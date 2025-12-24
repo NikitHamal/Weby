@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Weby</string>
+    <string name="app_tagline">Build websites from your phone</string>
+
+    <!-- Crash Activity -->
+    <string name="crash_title">Unexpected Error</string>
+    <string name="crash_copy">Copy Log</string>
+    <string name="crash_restart">Restart App</string>
+    <string name="crash_copied">Crash log copied to clipboard</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_editor">Editor</string>
+    <string name="nav_components">Components</string>
+    <string name="nav_layers">Layers</string>
+    <string name="nav_code">Code</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Home -->
+    <string name="home_projects">Projects</string>
+    <string name="home_recent">Recent</string>
+    <string name="home_templates">Templates</string>
+    <string name="home_new_project">New Project</string>
+    <string name="home_empty_title">Welcome to Weby</string>
+    <string name="home_empty_subtitle">Start building your first website</string>
+    <string name="home_storage_usage">Storage Used</string>
+
+    <!-- Project -->
+    <string name="project_create">Create Project</string>
+    <string name="project_name">Project Name</string>
+    <string name="project_name_hint">My Awesome Website</string>
+    <string name="project_description">Description (optional)</string>
+    <string name="project_from_scratch">Start from scratch</string>
+    <string name="project_from_template">Use a template</string>
+    <string name="project_import">Import existing</string>
+    <string name="project_settings">Project Settings</string>
+    <string name="project_pages">Pages</string>
+    <string name="project_assets">Assets</string>
+    <string name="project_export">Export</string>
+    <string name="project_delete">Delete Project</string>
+    <string name="project_duplicate">Duplicate</string>
+
+    <!-- Editor -->
+    <string name="editor_canvas">Canvas</string>
+    <string name="editor_visual">Visual</string>
+    <string name="editor_code">Code</string>
+    <string name="editor_split">Split View</string>
+    <string name="editor_undo">Undo</string>
+    <string name="editor_redo">Redo</string>
+    <string name="editor_save">Save</string>
+    <string name="editor_preview">Preview</string>
+    <string name="editor_zoom_in">Zoom In</string>
+    <string name="editor_zoom_out">Zoom Out</string>
+    <string name="editor_zoom_fit">Fit to Screen</string>
+
+    <!-- Components -->
+    <string name="components_layout">Layout</string>
+    <string name="components_basic">Basic</string>
+    <string name="components_forms">Forms</string>
+    <string name="components_navigation">Navigation</string>
+    <string name="components_media">Media</string>
+    <string name="components_advanced">Advanced</string>
+
+    <!-- Layers -->
+    <string name="layers_title">Layers</string>
+    <string name="layers_show">Show</string>
+    <string name="layers_hide">Hide</string>
+    <string name="layers_lock">Lock</string>
+    <string name="layers_unlock">Unlock</string>
+    <string name="layers_delete">Delete</string>
+    <string name="layers_rename">Rename</string>
+    <string name="layers_duplicate">Duplicate</string>
+
+    <!-- Styles -->
+    <string name="style_layout">Layout</string>
+    <string name="style_spacing">Spacing</string>
+    <string name="style_size">Size</string>
+    <string name="style_typography">Typography</string>
+    <string name="style_colors">Colors</string>
+    <string name="style_borders">Borders</string>
+    <string name="style_effects">Effects</string>
+    <string name="style_position">Position</string>
+
+    <!-- Breakpoints -->
+    <string name="breakpoint_mobile">Mobile</string>
+    <string name="breakpoint_tablet">Tablet</string>
+    <string name="breakpoint_desktop">Desktop</string>
+
+    <!-- Export -->
+    <string name="export_title">Export Project</string>
+    <string name="export_format">Format</string>
+    <string name="export_minified">Minified</string>
+    <string name="export_readable">Readable</string>
+    <string name="export_single_file">Single HTML file</string>
+    <string name="export_multi_file">Separate files</string>
+    <string name="export_include_assets">Include assets</string>
+    <string name="export_start">Export</string>
+    <string name="export_success">Project exported successfully</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_editor">Editor</string>
+    <string name="settings_autosave">Auto-save</string>
+    <string name="settings_grid">Show grid</string>
+    <string name="settings_snap">Snap to grid</string>
+    <string name="settings_rulers">Show rulers</string>
+    <string name="settings_storage">Storage</string>
+    <string name="settings_backup">Backup</string>
+    <string name="settings_restore">Restore</string>
+    <string name="settings_clear_cache">Clear cache</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_licenses">Open source licenses</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome_title">Welcome to Weby</string>
+    <string name="onboarding_welcome_desc">The most powerful no-code web builder for Android. Build professional websites right from your phone.</string>
+    <string name="onboarding_visual_title">Visual Builder</string>
+    <string name="onboarding_visual_desc">Drag and drop components to build your website visually. No coding required.</string>
+    <string name="onboarding_code_title">Full Code Access</string>
+    <string name="onboarding_code_desc">Need more control? Edit HTML, CSS, and JavaScript directly with our powerful code editor.</string>
+    <string name="onboarding_export_title">Export Anywhere</string>
+    <string name="onboarding_export_desc">Export clean, production-ready code. Deploy to any hosting platform.</string>
+    <string name="onboarding_get_started">Get Started</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_skip">Skip</string>
+
+    <!-- General -->
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="confirm">Confirm</string>
+    <string name="search">Search</string>
+    <string name="search_hint">Search…</string>
+    <string name="loading">Loading…</string>
+    <string name="error">Error</string>
+    <string name="retry">Retry</string>
+    <string name="ok">OK</string>
+    <string name="close">Close</string>
+</resources>
