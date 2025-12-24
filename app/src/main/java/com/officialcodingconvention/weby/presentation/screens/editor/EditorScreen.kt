@@ -1,7 +1,5 @@
 package com.officialcodingconvention.weby.presentation.screens.editor
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -13,29 +11,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.officialcodingconvention.weby.core.theme.WebyPrimary
 import com.officialcodingconvention.weby.domain.model.Breakpoint
-import com.officialcodingconvention.weby.domain.model.ComponentLibrary
 import com.officialcodingconvention.weby.domain.model.EditorMode
 import com.officialcodingconvention.weby.presentation.screens.editor.components.EditorCanvas
 import com.officialcodingconvention.weby.presentation.screens.editor.components.ComponentPanel
 import com.officialcodingconvention.weby.presentation.screens.editor.components.LayerPanel
-import com.officialcodingconvention.weby.presentation.screens.editor.components.StylePanel
 import com.officialcodingconvention.weby.presentation.screens.editor.components.CodeEditorPanel
+import com.officialcodingconvention.weby.presentation.screens.editor.components.PreviewPanel
 
 enum class EditorTab(val icon: ImageVector, val label: String) {
     CANVAS(Icons.Outlined.Crop169, "Canvas"),
-    COMPONENTS(Icons.Outlined.Widgets, "Components"),
+    COMPONENTS(Icons.Outlined.Widgets, "Add"),
     LAYERS(Icons.Outlined.Layers, "Layers"),
-    STYLES(Icons.Outlined.Palette, "Styles"),
-    CODE(Icons.Outlined.Code, "Code")
+    CODE(Icons.Outlined.Code, "Code"),
+    PREVIEW(Icons.Outlined.Visibility, "Preview")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,12 +42,17 @@ fun EditorScreen(
         key = projectId
     )
 ) {
-    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     var selectedTab by remember { mutableStateOf(EditorTab.CANVAS) }
 
     LaunchedEffect(projectId) {
         viewModel.loadProject(projectId)
+    }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == EditorTab.CODE || selectedTab == EditorTab.PREVIEW) {
+            viewModel.syncCodeToVisual()
+        }
     }
 
     Scaffold(
@@ -109,78 +108,64 @@ fun EditorScreen(
                     }
                 }
                 else -> {
-                    AnimatedContent(
-                        targetState = selectedTab,
-                        transitionSpec = {
-                            fadeIn(animationSpec = tween(150)) togetherWith
-                                fadeOut(animationSpec = tween(150))
-                        },
-                        label = "tab_content"
-                    ) { tab ->
-                        when (tab) {
-                            EditorTab.CANVAS -> {
-                                EditorCanvas(
-                                    elements = uiState.currentPageElements,
-                                    selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
-                                    breakpoint = uiState.editorState.currentBreakpoint,
-                                    zoom = uiState.editorState.zoom,
-                                    panOffset = uiState.editorState.panOffset,
-                                    showGrid = uiState.editorState.showGrid,
-                                    onElementSelected = { id -> viewModel.selectElement(id) },
-                                    onElementMoved = { id, offset -> viewModel.moveElement(id, offset) },
-                                    onElementResized = { id, size -> viewModel.resizeElement(id, size) },
-                                    onPanChanged = viewModel::setPan,
-                                    onZoomChanged = viewModel::setZoom,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.COMPONENTS -> {
-                                ComponentPanel(
-                                    onComponentSelected = { component ->
-                                        viewModel.addElementFromComponent(component)
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.LAYERS -> {
-                                LayerPanel(
-                                    elements = uiState.currentPageElements,
-                                    selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
-                                    onElementSelected = { id -> viewModel.selectElement(id) },
-                                    onElementVisibilityToggle = viewModel::toggleElementVisibility,
-                                    onElementLockToggle = viewModel::toggleElementLock,
-                                    onElementDelete = viewModel::deleteElement,
-                                    onElementDuplicate = viewModel::duplicateElement,
-                                    onMoveUp = viewModel::moveElementUp,
-                                    onMoveDown = viewModel::moveElementDown,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.STYLES -> {
-                                val selectedElement = uiState.currentPageElements.find {
-                                    it.id in uiState.editorState.selectedElementIds
-                                }
-                                StylePanel(
-                                    selectedElement = selectedElement,
-                                    onStyleChange = { styles ->
-                                        selectedElement?.let { element ->
-                                            viewModel.updateElementStyle(element.id, styles)
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.CODE -> {
-                                CodeEditorPanel(
-                                    htmlCode = uiState.generatedHtml,
-                                    cssCode = uiState.generatedCss,
-                                    jsCode = uiState.generatedJs,
-                                    onHtmlChange = viewModel::updateHtml,
-                                    onCssChange = viewModel::updateCss,
-                                    onJsChange = viewModel::updateJs,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
+                    when (selectedTab) {
+                        EditorTab.CANVAS -> {
+                            EditorCanvas(
+                                elements = uiState.currentPageElements,
+                                selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
+                                breakpoint = uiState.editorState.currentBreakpoint,
+                                zoom = uiState.editorState.zoom,
+                                panOffset = uiState.editorState.panOffset,
+                                showGrid = uiState.editorState.showGrid,
+                                onElementSelected = { id -> viewModel.selectElement(id) },
+                                onElementMoved = { id, offset -> viewModel.moveElement(id, offset) },
+                                onElementResized = { id, size -> viewModel.resizeElement(id, size) },
+                                onPanChanged = viewModel::setPan,
+                                onZoomChanged = viewModel::setZoom,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        EditorTab.COMPONENTS -> {
+                            ComponentPanel(
+                                onComponentSelected = { component ->
+                                    viewModel.addElementFromComponent(component)
+                                    selectedTab = EditorTab.CANVAS
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        EditorTab.LAYERS -> {
+                            LayerPanel(
+                                elements = uiState.currentPageElements,
+                                selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
+                                onElementSelected = { id -> viewModel.selectElement(id) },
+                                onElementVisibilityToggle = viewModel::toggleElementVisibility,
+                                onElementLockToggle = viewModel::toggleElementLock,
+                                onElementDelete = viewModel::deleteElement,
+                                onElementDuplicate = viewModel::duplicateElement,
+                                onMoveUp = viewModel::moveElementUp,
+                                onMoveDown = viewModel::moveElementDown,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        EditorTab.CODE -> {
+                            CodeEditorPanel(
+                                htmlCode = uiState.generatedHtml,
+                                cssCode = uiState.generatedCss,
+                                jsCode = uiState.generatedJs,
+                                onHtmlChange = viewModel::updateHtml,
+                                onCssChange = viewModel::updateCss,
+                                onJsChange = viewModel::updateJs,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        EditorTab.PREVIEW -> {
+                            PreviewPanel(
+                                htmlCode = uiState.generatedHtml,
+                                cssCode = uiState.generatedCss,
+                                jsCode = uiState.generatedJs,
+                                modifier = Modifier.fillMaxSize()
+                            )
                         }
                     }
                 }

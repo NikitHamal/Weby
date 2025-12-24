@@ -1,8 +1,5 @@
 package com.officialcodingconvention.weby.presentation.screens.onboarding
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -15,12 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -77,24 +70,19 @@ fun OnboardingScreen(
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val isLastPage = pagerState.currentPage == pages.size - 1
+    val currentPage = pages[pagerState.currentPage]
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Background decoration
-        OnboardingBackground(
-            currentPage = pagerState.currentPage,
-            accentColor = pages[pagerState.currentPage].accentColor
-        )
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
         ) {
-            // Skip button
+            // Skip button row
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -118,15 +106,12 @@ fun OnboardingScreen(
                 }
             }
 
-            // Pager content
+            // Pager content - no animations
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.weight(1f)
             ) { page ->
-                OnboardingPageContent(
-                    page = pages[page],
-                    isCurrentPage = page == pagerState.currentPage
-                )
+                OnboardingPageContent(page = pages[page])
             }
 
             // Bottom section
@@ -136,77 +121,72 @@ fun OnboardingScreen(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Page indicators
+                // Page indicators - simple, no animation
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(bottom = 32.dp)
                 ) {
                     pages.forEachIndexed { index, page ->
-                        PageIndicator(
-                            isSelected = index == pagerState.currentPage,
-                            color = page.accentColor
+                        Box(
+                            modifier = Modifier
+                                .height(8.dp)
+                                .width(if (index == pagerState.currentPage) 24.dp else 8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (index == pagerState.currentPage) page.accentColor
+                                    else MaterialTheme.colorScheme.outlineVariant
+                                )
                         )
                     }
                 }
 
-                // Action button
-                AnimatedContent(
-                    targetState = isLastPage,
-                    transitionSpec = {
-                        fadeIn(tween(300)) togetherWith fadeOut(tween(300))
-                    },
-                    label = "button_transition"
-                ) { showGetStarted ->
-                    if (showGetStarted) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    preferencesManager.setOnboardingCompleted(true)
-                                    onComplete()
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = pages[pagerState.currentPage].accentColor
-                            ),
-                            shape = MaterialTheme.shapes.large
-                        ) {
-                            Text(
-                                text = context.getString(R.string.onboarding_get_started),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            shape = MaterialTheme.shapes.large,
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = pages[pagerState.currentPage].accentColor
-                            ),
-                            border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
-                                brush = SolidColor(pages[pagerState.currentPage].accentColor.copy(alpha = 0.5f))
-                            )
-                        ) {
-                            Text(
-                                text = context.getString(R.string.onboarding_next),
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
-                                contentDescription = null
-                            )
-                        }
+                // Action button - simple state, no animation
+                if (isLastPage) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                preferencesManager.setOnboardingCompleted(true)
+                                onComplete()
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = currentPage.accentColor
+                        ),
+                        shape = MaterialTheme.shapes.large
+                    ) {
+                        Text(
+                            text = context.getString(R.string.onboarding_get_started),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                pagerState.scrollToPage(pagerState.currentPage + 1)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = MaterialTheme.shapes.large,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = currentPage.accentColor
+                        )
+                    ) {
+                        Text(
+                            text = context.getString(R.string.onboarding_next),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                            contentDescription = null
+                        )
                     }
                 }
             }
@@ -215,32 +195,15 @@ fun OnboardingScreen(
 }
 
 @Composable
-private fun OnboardingPageContent(
-    page: OnboardingPage,
-    isCurrentPage: Boolean
-) {
-    val animatedAlpha by animateFloatAsState(
-        targetValue = if (isCurrentPage) 1f else 0.5f,
-        animationSpec = tween(300),
-        label = "alpha"
-    )
-
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isCurrentPage) 1f else 0.9f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "scale"
-    )
-
+private fun OnboardingPageContent(page: OnboardingPage) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp)
-            .alpha(animatedAlpha)
-            .scale(animatedScale),
+            .padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Icon container with animated background
+        // Icon container - no animation
         Box(
             modifier = Modifier
                 .size(160.dp)
@@ -274,86 +237,6 @@ private fun OnboardingPageContent(
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp)
-        )
-    }
-}
-
-@Composable
-private fun PageIndicator(
-    isSelected: Boolean,
-    color: Color
-) {
-    val width by animateDpAsState(
-        targetValue = if (isSelected) 24.dp else 8.dp,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "indicator_width"
-    )
-
-    Box(
-        modifier = Modifier
-            .height(8.dp)
-            .width(width)
-            .clip(CircleShape)
-            .background(
-                if (isSelected) color
-                else MaterialTheme.colorScheme.outlineVariant
-            )
-    )
-}
-
-@Composable
-private fun OnboardingBackground(
-    currentPage: Int,
-    accentColor: Color
-) {
-    val animatedColor by animateColorAsState(
-        targetValue = accentColor,
-        animationSpec = tween(500),
-        label = "bg_color"
-    )
-
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        // Top gradient blob
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    animatedColor.copy(alpha = 0.08f),
-                    Color.Transparent
-                ),
-                center = Offset(size.width * 0.8f, size.height * 0.1f),
-                radius = size.width * 0.6f
-            ),
-            radius = size.width * 0.6f,
-            center = Offset(size.width * 0.8f, size.height * 0.1f)
-        )
-
-        // Bottom gradient blob
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    animatedColor.copy(alpha = 0.06f),
-                    Color.Transparent
-                ),
-                center = Offset(size.width * 0.2f, size.height * 0.85f),
-                radius = size.width * 0.5f
-            ),
-            radius = size.width * 0.5f,
-            center = Offset(size.width * 0.2f, size.height * 0.85f)
-        )
-
-        // Decorative circles
-        drawCircle(
-            color = animatedColor.copy(alpha = 0.1f),
-            radius = 80f,
-            center = Offset(size.width * 0.1f, size.height * 0.3f),
-            style = Stroke(width = 2f)
-        )
-
-        drawCircle(
-            color = animatedColor.copy(alpha = 0.08f),
-            radius = 120f,
-            center = Offset(size.width * 0.9f, size.height * 0.6f),
-            style = Stroke(width = 2f)
         )
     }
 }

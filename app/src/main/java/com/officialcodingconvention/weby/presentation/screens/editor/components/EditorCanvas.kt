@@ -2,9 +2,10 @@ package com.officialcodingconvention.weby.presentation.screens.editor.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -13,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -23,12 +23,15 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.officialcodingconvention.weby.domain.model.*
+import kotlin.math.abs
 
 @Composable
 fun EditorCanvas(
@@ -45,24 +48,22 @@ fun EditorCanvas(
     onZoomChanged: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current
-    val surfaceColor = MaterialTheme.colorScheme.surface
-    val outlineColor = MaterialTheme.colorScheme.outline
     val primaryColor = MaterialTheme.colorScheme.primary
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    val outlineColor = MaterialTheme.colorScheme.outline
 
     var canvasSize by remember { mutableStateOf(Size.Zero) }
-    var isDragging by remember { mutableStateOf(false) }
+    var isDraggingElement by remember { mutableStateOf(false) }
     var dragStartOffset by remember { mutableStateOf(Offset.Zero) }
-    var currentDragOffset by remember { mutableStateOf(Offset.Zero) }
     var activeHandle by remember { mutableStateOf<ResizeHandle?>(null) }
     var initialElementBounds by remember { mutableStateOf<Rect?>(null) }
 
-    val viewportWidth = when (breakpoint) {
-        Breakpoint.LARGE_DESKTOP -> 1920f
-        Breakpoint.DESKTOP -> 1440f
-        Breakpoint.TABLET -> 768f
-        Breakpoint.MOBILE -> 375f
+    val viewportWidth = remember(breakpoint) {
+        when (breakpoint) {
+            Breakpoint.LARGE_DESKTOP -> 1920f
+            Breakpoint.DESKTOP -> 1440f
+            Breakpoint.TABLET -> 768f
+            Breakpoint.MOBILE -> 375f
+        }
     }
     val viewportHeight = 900f
 
@@ -72,94 +73,138 @@ fun EditorCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, gestureZoom, _ ->
-                        if (!isDragging) {
-                            val newZoom = (zoom * gestureZoom).coerceIn(0.25f, 3f)
-                            onZoomChanged(newZoom)
-                            onPanChanged(panOffset + pan)
-                        }
-                    }
-                }
-                .pointerInput(elements, selectedElementId, zoom, panOffset) {
-                    detectTapGestures { tapOffset ->
-                        val canvasPoint = screenToCanvas(tapOffset, zoom, panOffset, canvasSize)
-                        val tappedElement = findElementAtPoint(elements, canvasPoint)
-                        onElementSelected(tappedElement?.id)
-                    }
-                }
-                .pointerInput(elements, selectedElementId, zoom, panOffset) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            val canvasPoint = screenToCanvas(offset, zoom, panOffset, canvasSize)
+                .pointerInput(elements, selectedElementId, zoom, panOffset, breakpoint) {
+                    awaitEachGesture {
+                        val firstDown = awaitFirstDown(requireUnconsumed = false)
+                        val startPosition = firstDown.position
 
-                            selectedElementId?.let { selectedId ->
-                                val selectedElement = findElementById(elements, selectedId)
-                                selectedElement?.let { element ->
-                                    val bounds = getElementBounds(element)
-                                    val handle = detectResizeHandle(canvasPoint, bounds)
-                                    if (handle != null) {
-                                        activeHandle = handle
-                                        initialElementBounds = bounds
-                                        isDragging = true
-                                        dragStartOffset = canvasPoint
-                                        return@detectDragGestures
-                                    }
+                        val canvasPoint = screenToCanvas(
+                            screenPoint = startPosition,
+                            zoom = zoom,
+                            panOffset = panOffset,
+                            canvasSize = canvasSize,
+                            viewportWidth = viewportWidth
+                        )
 
-                                    if (bounds.contains(canvasPoint)) {
-                                        isDragging = true
-                                        dragStartOffset = canvasPoint
-                                        initialElementBounds = bounds
-                                        return@detectDragGestures
-                                    }
+                        var elementToDrag: WebElement? = null
+                        var handleToResize: ResizeHandle? = null
+                        var elementBounds: Rect? = null
+
+                        selectedElementId?.let { selectedId ->
+                            val selectedElement = findElementById(elements, selectedId)
+                            selectedElement?.let { element ->
+                                val bounds = getElementBounds(element)
+                                val handle = detectResizeHandle(canvasPoint, bounds)
+                                if (handle != null) {
+                                    handleToResize = handle
+                                    elementBounds = bounds
+                                    elementToDrag = element
+                                } else if (bounds.contains(canvasPoint)) {
+                                    elementToDrag = element
+                                    elementBounds = bounds
                                 }
                             }
+                        }
 
+                        if (elementToDrag == null) {
                             val tappedElement = findElementAtPoint(elements, canvasPoint)
                             if (tappedElement != null) {
+                                elementToDrag = tappedElement
+                                elementBounds = getElementBounds(tappedElement)
                                 onElementSelected(tappedElement.id)
-                                isDragging = true
-                                dragStartOffset = canvasPoint
-                                initialElementBounds = getElementBounds(tappedElement)
                             }
-                        },
-                        onDrag = { change, _ ->
-                            if (isDragging && selectedElementId != null) {
-                                change.consume()
-                                val canvasPoint = screenToCanvas(change.position, zoom, panOffset, canvasSize)
-                                currentDragOffset = canvasPoint - dragStartOffset
+                        }
 
-                                initialElementBounds?.let { bounds ->
-                                    if (activeHandle != null) {
-                                        val newSize = calculateResizedSize(
-                                            bounds,
-                                            activeHandle!!,
-                                            currentDragOffset
+                        var pointerCount = 1
+                        var totalDrag = Offset.Zero
+                        var hasMoved = false
+                        val dragThreshold = 8f
+
+                        do {
+                            val event = awaitPointerEvent()
+                            pointerCount = event.changes.count { it.pressed }
+
+                            if (pointerCount >= 2) {
+                                val zoomChange = event.calculateZoom()
+                                val panChange = event.calculatePan()
+
+                                if (zoomChange != 1f) {
+                                    val newZoom = (zoom * zoomChange).coerceIn(0.25f, 3f)
+                                    onZoomChanged(newZoom)
+                                }
+                                if (panChange != Offset.Zero) {
+                                    onPanChanged(panOffset + panChange)
+                                }
+
+                                event.changes.forEach { it.consume() }
+                            } else if (pointerCount == 1) {
+                                val change = event.changes.firstOrNull { it.pressed }
+                                if (change != null) {
+                                    val dragAmount = change.positionChange()
+
+                                    if (dragAmount != Offset.Zero) {
+                                        totalDrag += dragAmount
+                                        val distance = kotlin.math.sqrt(
+                                            totalDrag.x * totalDrag.x + totalDrag.y * totalDrag.y
                                         )
-                                        onElementResized(selectedElementId, newSize)
-                                    } else {
-                                        val newPosition = Offset(
-                                            bounds.left + currentDragOffset.x,
-                                            bounds.top + currentDragOffset.y
-                                        )
-                                        onElementMoved(selectedElementId, newPosition)
+
+                                        if (distance > dragThreshold) {
+                                            hasMoved = true
+
+                                            if (elementToDrag != null && !elementToDrag!!.isLocked) {
+                                                isDraggingElement = true
+                                                val currentCanvasPoint = screenToCanvas(
+                                                    screenPoint = change.position,
+                                                    zoom = zoom,
+                                                    panOffset = panOffset,
+                                                    canvasSize = canvasSize,
+                                                    viewportWidth = viewportWidth
+                                                )
+
+                                                if (!isDraggingElement) {
+                                                    dragStartOffset = canvasPoint
+                                                    initialElementBounds = elementBounds
+                                                    activeHandle = handleToResize
+                                                    isDraggingElement = true
+                                                }
+
+                                                val dragDelta = currentCanvasPoint - (dragStartOffset)
+
+                                                initialElementBounds?.let { bounds ->
+                                                    if (activeHandle != null) {
+                                                        val newSize = calculateResizedSize(
+                                                            bounds,
+                                                            activeHandle!!,
+                                                            dragDelta
+                                                        )
+                                                        onElementResized(elementToDrag!!.id, newSize)
+                                                    } else {
+                                                        val newPosition = Offset(
+                                                            bounds.left + dragDelta.x,
+                                                            bounds.top + dragDelta.y
+                                                        )
+                                                        onElementMoved(elementToDrag!!.id, newPosition)
+                                                    }
+                                                }
+                                                change.consume()
+                                            } else {
+                                                onPanChanged(panOffset + dragAmount)
+                                                change.consume()
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        },
-                        onDragEnd = {
-                            isDragging = false
-                            activeHandle = null
-                            initialElementBounds = null
-                            currentDragOffset = Offset.Zero
-                        },
-                        onDragCancel = {
-                            isDragging = false
-                            activeHandle = null
-                            initialElementBounds = null
-                            currentDragOffset = Offset.Zero
+                        } while (event.changes.any { it.pressed })
+
+                        if (!hasMoved && elementToDrag == null) {
+                            onElementSelected(null)
                         }
-                    )
+
+                        isDraggingElement = false
+                        activeHandle = null
+                        initialElementBounds = null
+                    }
                 }
         ) {
             canvasSize = size
@@ -493,13 +538,6 @@ private fun DrawScope.drawBreakpointIndicator(
     panOffset: Offset,
     canvasSize: Size
 ) {
-    val label = when (breakpoint) {
-        Breakpoint.LARGE_DESKTOP -> "Large Desktop (1920px)"
-        Breakpoint.DESKTOP -> "Desktop (1440px)"
-        Breakpoint.TABLET -> "Tablet (768px)"
-        Breakpoint.MOBILE -> "Mobile (375px)"
-    }
-
     val x = panOffset.x + (canvasSize.width - viewportWidth * zoom) / 2
 
     drawRect(
@@ -605,9 +643,9 @@ private fun screenToCanvas(
     screenPoint: Offset,
     zoom: Float,
     panOffset: Offset,
-    canvasSize: Size
+    canvasSize: Size,
+    viewportWidth: Float
 ): Offset {
-    val viewportWidth = 1440f
     val offsetX = panOffset.x + (canvasSize.width - viewportWidth * zoom) / 2
     val offsetY = panOffset.y + 40f
 
@@ -644,7 +682,7 @@ private enum class ResizeHandle {
 }
 
 private fun detectResizeHandle(point: Offset, bounds: Rect): ResizeHandle? {
-    val handleSize = 12f
+    val handleSize = 16f
     val handles = mapOf(
         ResizeHandle.TOP_LEFT to Offset(bounds.left, bounds.top),
         ResizeHandle.TOP_CENTER to Offset(bounds.centerX, bounds.top),
