@@ -1,7 +1,6 @@
 package com.officialcodingconvention.weby.presentation.screens.editor.components
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -13,7 +12,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -24,11 +22,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.*
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.officialcodingconvention.weby.domain.model.*
+
+private enum class CanvasResizeHandle {
+    TOP_LEFT, TOP_CENTER, TOP_RIGHT,
+    MIDDLE_LEFT, MIDDLE_RIGHT,
+    BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT
+}
 
 @Composable
 fun EditorCanvas(
@@ -45,28 +46,53 @@ fun EditorCanvas(
     onZoomChanged: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current
-    val surfaceColor = MaterialTheme.colorScheme.surface
-    val outlineColor = MaterialTheme.colorScheme.outline
     val primaryColor = MaterialTheme.colorScheme.primary
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    val outlineColor = MaterialTheme.colorScheme.outline
 
     var canvasSize by remember { mutableStateOf(Size.Zero) }
     var isDragging by remember { mutableStateOf(false) }
     var dragStartOffset by remember { mutableStateOf(Offset.Zero) }
-    var currentDragOffset by remember { mutableStateOf(Offset.Zero) }
-    var activeHandle by remember { mutableStateOf<ResizeHandle?>(null) }
+    var activeHandle by remember { mutableStateOf<CanvasResizeHandle?>(null) }
     var initialElementBounds by remember { mutableStateOf<Rect?>(null) }
 
-    val viewportWidth = when (breakpoint) {
-        Breakpoint.LARGE_DESKTOP -> 1920f
-        Breakpoint.DESKTOP -> 1440f
-        Breakpoint.TABLET -> 768f
-        Breakpoint.MOBILE -> 375f
+    val viewportWidth by remember(breakpoint) {
+        derivedStateOf {
+            when (breakpoint) {
+                Breakpoint.LARGE_DESKTOP -> 1920f
+                Breakpoint.DESKTOP -> 1440f
+                Breakpoint.TABLET -> 768f
+                Breakpoint.MOBILE -> 375f
+            }
+        }
     }
     val viewportHeight = 900f
 
-    val textMeasurer = rememberTextMeasurer()
+    val elementBoundsCache by remember(elements) {
+        derivedStateOf { buildBoundsCache(elements) }
+    }
+
+    val viewportRect by remember(canvasSize, zoom, panOffset, viewportWidth, viewportHeight) {
+        derivedStateOf {
+            if (canvasSize == Size.Zero) Rect.Zero
+            else {
+                val offsetX = panOffset.x + (canvasSize.width - viewportWidth * zoom) / 2
+                val offsetY = panOffset.y + 40f
+                Rect(
+                    left = -offsetX / zoom,
+                    top = -offsetY / zoom,
+                    right = (-offsetX + canvasSize.width) / zoom,
+                    bottom = (-offsetY + canvasSize.height) / zoom
+                )
+            }
+        }
+    }
+
+    val visibleElements by remember(elements, viewportRect, elementBoundsCache) {
+        derivedStateOf {
+            if (viewportRect == Rect.Zero) elements
+            else filterVisibleElements(elements, viewportRect, elementBoundsCache)
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Canvas(
@@ -81,22 +107,26 @@ fun EditorCanvas(
                         }
                     }
                 }
-                .pointerInput(elements, selectedElementId, zoom, panOffset) {
+                .pointerInput(elementBoundsCache, zoom, panOffset, viewportWidth) {
                     detectTapGestures { tapOffset ->
-                        val canvasPoint = screenToCanvas(tapOffset, zoom, panOffset, canvasSize)
-                        val tappedElement = findElementAtPoint(elements, canvasPoint)
+                        val canvasPoint = screenToCanvas(
+                            tapOffset, zoom, panOffset, canvasSize, viewportWidth
+                        )
+                        val tappedElement = findElementAtPoint(
+                            elements, canvasPoint, elementBoundsCache
+                        )
                         onElementSelected(tappedElement?.id)
                     }
                 }
-                .pointerInput(elements, selectedElementId, zoom, panOffset) {
+                .pointerInput(elementBoundsCache, selectedElementId, zoom, panOffset, viewportWidth) {
                     detectDragGestures(
                         onDragStart = { offset ->
-                            val canvasPoint = screenToCanvas(offset, zoom, panOffset, canvasSize)
-
+                            val canvasPoint = screenToCanvas(
+                                offset, zoom, panOffset, canvasSize, viewportWidth
+                            )
                             selectedElementId?.let { selectedId ->
-                                val selectedElement = findElementById(elements, selectedId)
-                                selectedElement?.let { element ->
-                                    val bounds = getElementBounds(element)
+                                val bounds = elementBoundsCache[selectedId]
+                                if (bounds != null) {
                                     val handle = detectResizeHandle(canvasPoint, bounds)
                                     if (handle != null) {
                                         activeHandle = handle
@@ -105,7 +135,6 @@ fun EditorCanvas(
                                         dragStartOffset = canvasPoint
                                         return@detectDragGestures
                                     }
-
                                     if (bounds.contains(canvasPoint)) {
                                         isDragging = true
                                         dragStartOffset = canvasPoint
@@ -114,33 +143,33 @@ fun EditorCanvas(
                                     }
                                 }
                             }
-
-                            val tappedElement = findElementAtPoint(elements, canvasPoint)
+                            val tappedElement = findElementAtPoint(
+                                elements, canvasPoint, elementBoundsCache
+                            )
                             if (tappedElement != null) {
                                 onElementSelected(tappedElement.id)
                                 isDragging = true
                                 dragStartOffset = canvasPoint
-                                initialElementBounds = getElementBounds(tappedElement)
+                                initialElementBounds = elementBoundsCache[tappedElement.id]
                             }
                         },
                         onDrag = { change, _ ->
                             if (isDragging && selectedElementId != null) {
                                 change.consume()
-                                val canvasPoint = screenToCanvas(change.position, zoom, panOffset, canvasSize)
-                                currentDragOffset = canvasPoint - dragStartOffset
-
+                                val canvasPoint = screenToCanvas(
+                                    change.position, zoom, panOffset, canvasSize, viewportWidth
+                                )
+                                val dragOffset = canvasPoint - dragStartOffset
                                 initialElementBounds?.let { bounds ->
                                     if (activeHandle != null) {
                                         val newSize = calculateResizedSize(
-                                            bounds,
-                                            activeHandle!!,
-                                            currentDragOffset
+                                            bounds, activeHandle!!, dragOffset
                                         )
                                         onElementResized(selectedElementId, newSize)
                                     } else {
                                         val newPosition = Offset(
-                                            bounds.left + currentDragOffset.x,
-                                            bounds.top + currentDragOffset.y
+                                            bounds.left + dragOffset.x,
+                                            bounds.top + dragOffset.y
                                         )
                                         onElementMoved(selectedElementId, newPosition)
                                     }
@@ -151,25 +180,18 @@ fun EditorCanvas(
                             isDragging = false
                             activeHandle = null
                             initialElementBounds = null
-                            currentDragOffset = Offset.Zero
                         },
                         onDragCancel = {
                             isDragging = false
                             activeHandle = null
                             initialElementBounds = null
-                            currentDragOffset = Offset.Zero
                         }
                     )
                 }
         ) {
             canvasSize = size
-
             drawRect(color = Color(0xFFF5F5F5))
-
-            if (showGrid) {
-                drawGrid(zoom, panOffset)
-            }
-
+            if (showGrid) drawCanvasGrid(zoom, panOffset)
             translate(
                 left = panOffset.x + (size.width - viewportWidth * zoom) / 2,
                 top = panOffset.y + 40f
@@ -185,33 +207,30 @@ fun EditorCanvas(
                     topLeft = Offset.Zero,
                     size = Size(viewportWidth * zoom, viewportHeight * zoom)
                 )
-
                 clipRect(
                     left = 0f,
                     top = 0f,
                     right = viewportWidth * zoom,
                     bottom = viewportHeight * zoom
                 ) {
-                    elements.forEach { element ->
-                        drawElement(
+                    visibleElements.forEach { element ->
+                        drawCanvasElement(
                             element = element,
                             zoom = zoom,
                             isSelected = element.id == selectedElementId,
                             primaryColor = primaryColor,
                             outlineColor = outlineColor,
-                            textMeasurer = textMeasurer
+                            boundsCache = elementBoundsCache
                         )
                     }
-
                     selectedElementId?.let { selectedId ->
-                        findElementById(elements, selectedId)?.let { element ->
-                            drawSelectionOverlay(element, zoom, primaryColor)
+                        elementBoundsCache[selectedId]?.let { bounds ->
+                            drawSelectionOverlay(bounds, zoom, primaryColor)
                         }
                     }
                 }
             }
-
-            drawBreakpointIndicator(breakpoint, viewportWidth, zoom, panOffset, size)
+            drawBreakpointLabel(viewportWidth, zoom, panOffset, size)
         }
 
         CanvasControls(
@@ -254,34 +273,20 @@ private fun CanvasControls(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             IconButton(onClick = onZoomOut) {
-                Icon(
-                    imageVector = Icons.Default.ZoomOut,
-                    contentDescription = "Zoom out"
-                )
+                Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out")
             }
-
             IconButton(onClick = onResetView) {
-                Icon(
-                    imageVector = Icons.Default.CenterFocusWeak,
-                    contentDescription = "Reset view"
-                )
+                Icon(Icons.Default.CenterFocusWeak, contentDescription = "Reset view")
             }
-
             IconButton(onClick = onZoomIn) {
-                Icon(
-                    imageVector = Icons.Default.ZoomIn,
-                    contentDescription = "Zoom in"
-                )
+                Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in")
             }
         }
     }
 }
 
 @Composable
-private fun ZoomIndicator(
-    zoom: Float,
-    modifier: Modifier = Modifier
-) {
+private fun ZoomIndicator(zoom: Float, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(8.dp),
@@ -295,251 +300,64 @@ private fun ZoomIndicator(
     }
 }
 
-private fun DrawScope.drawGrid(zoom: Float, panOffset: Offset) {
-    val gridSize = 20f * zoom
-    val gridColor = Color(0xFFE0E0E0)
-    val majorGridColor = Color(0xFFBDBDBD)
-
-    val startX = (panOffset.x % gridSize) - gridSize
-    val startY = (panOffset.y % gridSize) - gridSize
-
-    var x = startX
-    var gridIndex = 0
-    while (x < size.width + gridSize) {
-        val isMajor = gridIndex % 5 == 0
-        drawLine(
-            color = if (isMajor) majorGridColor else gridColor,
-            start = Offset(x, 0f),
-            end = Offset(x, size.height),
-            strokeWidth = if (isMajor) 1f else 0.5f
-        )
-        x += gridSize
-        gridIndex++
+private fun buildBoundsCache(elements: List<WebElement>): Map<String, Rect> {
+    val cache = mutableMapOf<String, Rect>()
+    fun addBounds(elementList: List<WebElement>) {
+        for (element in elementList) {
+            cache[element.id] = computeElementBounds(element)
+            if (element.children.isNotEmpty()) addBounds(element.children)
+        }
     }
-
-    var y = startY
-    gridIndex = 0
-    while (y < size.height + gridSize) {
-        val isMajor = gridIndex % 5 == 0
-        drawLine(
-            color = if (isMajor) majorGridColor else gridColor,
-            start = Offset(0f, y),
-            end = Offset(size.width, y),
-            strokeWidth = if (isMajor) 1f else 0.5f
-        )
-        y += gridSize
-        gridIndex++
-    }
+    addBounds(elements)
+    return cache
 }
 
-private fun DrawScope.drawElement(
-    element: WebElement,
-    zoom: Float,
-    isSelected: Boolean,
-    primaryColor: Color,
-    outlineColor: Color,
-    textMeasurer: TextMeasurer
-) {
-    val bounds = getElementBounds(element)
-    val scaledBounds = Rect(
-        left = bounds.left * zoom,
-        top = bounds.top * zoom,
-        right = bounds.right * zoom,
-        bottom = bounds.bottom * zoom
-    )
-
-    val backgroundColor = element.styles.backgroundColor?.let { parseColor(it) }
-        ?: getDefaultBackgroundColor(element.type)
-
-    drawRect(
-        color = backgroundColor,
-        topLeft = Offset(scaledBounds.left, scaledBounds.top),
-        size = Size(scaledBounds.width, scaledBounds.height)
-    )
-
-    element.styles.border?.let { border ->
-        val borderColor = parseBorderColor(border)
-        val borderWidth = parseBorderWidth(border)
-        drawRect(
-            color = borderColor,
-            topLeft = Offset(scaledBounds.left, scaledBounds.top),
-            size = Size(scaledBounds.width, scaledBounds.height),
-            style = Stroke(width = borderWidth * zoom)
-        )
-    }
-
-    if (element.content.isNotEmpty() && isTextElement(element.type)) {
-        val textColor = element.styles.color?.let { parseColor(it) } ?: Color.Black
-        val fontSize = element.styles.fontSize?.let { parseFontSize(it) } ?: 14f
-
-        val textStyle = TextStyle(
-            color = textColor,
-            fontSize = (fontSize * zoom).sp
-        )
-
-        val textLayoutResult = textMeasurer.measure(
-            text = element.content,
-            style = textStyle,
-            constraints = androidx.compose.ui.unit.Constraints(
-                maxWidth = scaledBounds.width.toInt().coerceAtLeast(1)
-            )
-        )
-
-        drawText(
-            textLayoutResult = textLayoutResult,
-            topLeft = Offset(
-                scaledBounds.left + 4 * zoom,
-                scaledBounds.top + 4 * zoom
-            )
-        )
-    }
-
-    if (!isSelected) {
-        drawRect(
-            color = outlineColor.copy(alpha = 0.2f),
-            topLeft = Offset(scaledBounds.left, scaledBounds.top),
-            size = Size(scaledBounds.width, scaledBounds.height),
-            style = Stroke(width = 1f)
-        )
-    }
-
-    drawElementTypeIndicator(element, scaledBounds, zoom, textMeasurer)
-
-    element.children.forEach { child ->
-        drawElement(child, zoom, isSelected = false, primaryColor, outlineColor, textMeasurer)
-    }
-}
-
-private fun DrawScope.drawElementTypeIndicator(
-    element: WebElement,
-    bounds: Rect,
-    zoom: Float,
-    textMeasurer: TextMeasurer
-) {
-    val label = element.type.name.lowercase().take(3)
-    val labelStyle = TextStyle(
-        color = Color.White,
-        fontSize = (8f * zoom).sp
-    )
-
-    val labelResult = textMeasurer.measure(label, labelStyle)
-    val labelPadding = 2f * zoom
-    val labelWidth = labelResult.size.width + labelPadding * 2
-    val labelHeight = labelResult.size.height + labelPadding * 2
-
-    drawRect(
-        color = getElementTypeColor(element.type),
-        topLeft = Offset(bounds.left, bounds.top - labelHeight),
-        size = Size(labelWidth, labelHeight)
-    )
-
-    drawText(
-        textLayoutResult = labelResult,
-        topLeft = Offset(bounds.left + labelPadding, bounds.top - labelHeight + labelPadding)
-    )
-}
-
-private fun DrawScope.drawSelectionOverlay(
-    element: WebElement,
-    zoom: Float,
-    primaryColor: Color
-) {
-    val bounds = getElementBounds(element)
-    val scaledBounds = Rect(
-        left = bounds.left * zoom,
-        top = bounds.top * zoom,
-        right = bounds.right * zoom,
-        bottom = bounds.bottom * zoom
-    )
-
-    drawRect(
-        color = primaryColor,
-        topLeft = Offset(scaledBounds.left, scaledBounds.top),
-        size = Size(scaledBounds.width, scaledBounds.height),
-        style = Stroke(width = 2f)
-    )
-
-    val handleSize = 8f
-    val handles = listOf(
-        Offset(scaledBounds.left, scaledBounds.top),
-        Offset(scaledBounds.center.x, scaledBounds.top),
-        Offset(scaledBounds.right, scaledBounds.top),
-        Offset(scaledBounds.right, scaledBounds.center.y),
-        Offset(scaledBounds.right, scaledBounds.bottom),
-        Offset(scaledBounds.center.x, scaledBounds.bottom),
-        Offset(scaledBounds.left, scaledBounds.bottom),
-        Offset(scaledBounds.left, scaledBounds.center.y)
-    )
-
-    handles.forEach { handle ->
-        drawRect(
-            color = Color.White,
-            topLeft = Offset(handle.x - handleSize / 2, handle.y - handleSize / 2),
-            size = Size(handleSize, handleSize)
-        )
-        drawRect(
-            color = primaryColor,
-            topLeft = Offset(handle.x - handleSize / 2, handle.y - handleSize / 2),
-            size = Size(handleSize, handleSize),
-            style = Stroke(width = 1.5f)
-        )
-    }
-}
-
-private fun DrawScope.drawBreakpointIndicator(
-    breakpoint: Breakpoint,
-    viewportWidth: Float,
-    zoom: Float,
-    panOffset: Offset,
-    canvasSize: Size
-) {
-    val label = when (breakpoint) {
-        Breakpoint.LARGE_DESKTOP -> "Large Desktop (1920px)"
-        Breakpoint.DESKTOP -> "Desktop (1440px)"
-        Breakpoint.TABLET -> "Tablet (768px)"
-        Breakpoint.MOBILE -> "Mobile (375px)"
-    }
-
-    val x = panOffset.x + (canvasSize.width - viewportWidth * zoom) / 2
-
-    drawRect(
-        color = Color(0xFF424242),
-        topLeft = Offset(x, 8f),
-        size = Size(viewportWidth * zoom, 24f)
-    )
-}
-
-private fun getElementBounds(element: WebElement): Rect {
+private fun computeElementBounds(element: WebElement): Rect {
     val x = element.styles.left?.let { parseSize(it) } ?: 0f
     val y = element.styles.top?.let { parseSize(it) } ?: 0f
     val width = element.styles.width?.let { parseSize(it) } ?: 100f
     val height = element.styles.height?.let { parseSize(it) } ?: 50f
-
     return Rect(x, y, x + width, y + height)
 }
 
+private fun filterVisibleElements(
+    elements: List<WebElement>,
+    viewportRect: Rect,
+    boundsCache: Map<String, Rect>
+): List<WebElement> {
+    return elements.filter { element ->
+        val bounds = boundsCache[element.id] ?: return@filter true
+        bounds.overlaps(viewportRect)
+    }
+}
+
 private fun parseSize(value: String): Float {
-    return value.replace(Regex("[^0-9.]"), "").toFloatOrNull() ?: 0f
+    return value.replace(Regex("[^0-9.-]"), "").toFloatOrNull() ?: 0f
 }
 
 private fun parseColor(value: String): Color {
     return try {
         when {
             value.startsWith("#") -> {
-                val colorLong = value.removePrefix("#").toLong(16)
-                if (value.length == 7) {
-                    Color(colorLong or 0xFF000000)
-                } else {
-                    Color(colorLong)
+                val hex = value.removePrefix("#")
+                when (hex.length) {
+                    3 -> {
+                        val r = hex[0].toString().repeat(2).toInt(16)
+                        val g = hex[1].toString().repeat(2).toInt(16)
+                        val b = hex[2].toString().repeat(2).toInt(16)
+                        Color(r, g, b)
+                    }
+                    6 -> Color(hex.toLong(16) or 0xFF000000)
+                    8 -> Color(hex.toLong(16))
+                    else -> Color.Transparent
                 }
             }
             value.startsWith("rgb") -> {
                 val values = value.replace(Regex("[^0-9,]"), "")
                     .split(",")
                     .mapNotNull { it.trim().toIntOrNull() }
-                if (values.size >= 3) {
-                    Color(values[0], values[1], values[2])
-                } else Color.Transparent
+                if (values.size >= 3) Color(values[0], values[1], values[2])
+                else Color.Transparent
             }
             else -> Color.Transparent
         }
@@ -548,23 +366,7 @@ private fun parseColor(value: String): Color {
     }
 }
 
-private fun parseBorderColor(border: String): Color {
-    val parts = border.split(" ")
-    val colorPart = parts.lastOrNull { it.startsWith("#") || it.startsWith("rgb") }
-    return colorPart?.let { parseColor(it) } ?: Color.Gray
-}
-
-private fun parseBorderWidth(border: String): Float {
-    val parts = border.split(" ")
-    val widthPart = parts.firstOrNull { it.endsWith("px") }
-    return widthPart?.let { parseSize(it) } ?: 1f
-}
-
-private fun parseFontSize(value: String): Float {
-    return parseSize(value).takeIf { it > 0 } ?: 14f
-}
-
-private fun getDefaultBackgroundColor(type: ElementType): Color {
+private fun getElementBackgroundColor(type: ElementType): Color {
     return when (type) {
         ElementType.DIV, ElementType.SECTION, ElementType.ARTICLE,
         ElementType.HEADER, ElementType.FOOTER, ElementType.MAIN,
@@ -593,69 +395,203 @@ private fun getElementTypeColor(type: ElementType): Color {
     }
 }
 
-private fun isTextElement(type: ElementType): Boolean {
-    return type in listOf(
-        ElementType.H1, ElementType.H2, ElementType.H3, ElementType.H4,
-        ElementType.H5, ElementType.H6, ElementType.P, ElementType.SPAN,
-        ElementType.A, ElementType.LABEL, ElementType.BUTTON
+private fun DrawScope.drawCanvasGrid(zoom: Float, panOffset: Offset) {
+    val gridSize = 20f * zoom
+    val gridColor = Color(0xFFE0E0E0)
+    val majorGridColor = Color(0xFFBDBDBD)
+    val startX = (panOffset.x % gridSize) - gridSize
+    val startY = (panOffset.y % gridSize) - gridSize
+    var x = startX
+    var gridIndex = 0
+    while (x < size.width + gridSize) {
+        val isMajor = gridIndex % 5 == 0
+        drawLine(
+            color = if (isMajor) majorGridColor else gridColor,
+            start = Offset(x, 0f),
+            end = Offset(x, size.height),
+            strokeWidth = if (isMajor) 1f else 0.5f
+        )
+        x += gridSize
+        gridIndex++
+    }
+    var y = startY
+    gridIndex = 0
+    while (y < size.height + gridSize) {
+        val isMajor = gridIndex % 5 == 0
+        drawLine(
+            color = if (isMajor) majorGridColor else gridColor,
+            start = Offset(0f, y),
+            end = Offset(size.width, y),
+            strokeWidth = if (isMajor) 1f else 0.5f
+        )
+        y += gridSize
+        gridIndex++
+    }
+}
+
+private fun DrawScope.drawCanvasElement(
+    element: WebElement,
+    zoom: Float,
+    isSelected: Boolean,
+    primaryColor: Color,
+    outlineColor: Color,
+    boundsCache: Map<String, Rect>
+) {
+    val bounds = boundsCache[element.id] ?: return
+    val scaledBounds = Rect(
+        left = bounds.left * zoom,
+        top = bounds.top * zoom,
+        right = bounds.right * zoom,
+        bottom = bounds.bottom * zoom
     )
+    val backgroundColor = element.styles.backgroundColor?.let { parseColor(it) }
+        ?: getElementBackgroundColor(element.type)
+    drawRect(
+        color = backgroundColor,
+        topLeft = Offset(scaledBounds.left, scaledBounds.top),
+        size = Size(scaledBounds.width, scaledBounds.height)
+    )
+    element.styles.border?.let { border ->
+        val borderColor = parseBorderColor(border)
+        val borderWidth = parseBorderWidth(border)
+        drawRect(
+            color = borderColor,
+            topLeft = Offset(scaledBounds.left, scaledBounds.top),
+            size = Size(scaledBounds.width, scaledBounds.height),
+            style = Stroke(width = borderWidth * zoom)
+        )
+    }
+    if (!isSelected) {
+        drawRect(
+            color = outlineColor.copy(alpha = 0.2f),
+            topLeft = Offset(scaledBounds.left, scaledBounds.top),
+            size = Size(scaledBounds.width, scaledBounds.height),
+            style = Stroke(width = 1f)
+        )
+    }
+    drawElementTypeIndicator(element.type, scaledBounds, zoom)
+    element.children.forEach { child ->
+        drawCanvasElement(child, zoom, false, primaryColor, outlineColor, boundsCache)
+    }
+}
+
+private fun DrawScope.drawElementTypeIndicator(type: ElementType, bounds: Rect, zoom: Float) {
+    val typeColor = getElementTypeColor(type)
+    val labelHeight = 14f * zoom
+    val labelWidth = 24f * zoom
+    drawRect(
+        color = typeColor,
+        topLeft = Offset(bounds.left, bounds.top - labelHeight),
+        size = Size(labelWidth, labelHeight)
+    )
+}
+
+private fun DrawScope.drawSelectionOverlay(bounds: Rect, zoom: Float, primaryColor: Color) {
+    val scaledBounds = Rect(
+        left = bounds.left * zoom,
+        top = bounds.top * zoom,
+        right = bounds.right * zoom,
+        bottom = bounds.bottom * zoom
+    )
+    drawRect(
+        color = primaryColor,
+        topLeft = Offset(scaledBounds.left, scaledBounds.top),
+        size = Size(scaledBounds.width, scaledBounds.height),
+        style = Stroke(width = 2f)
+    )
+    val handleSize = 8f
+    val handles = listOf(
+        Offset(scaledBounds.left, scaledBounds.top),
+        Offset(scaledBounds.center.x, scaledBounds.top),
+        Offset(scaledBounds.right, scaledBounds.top),
+        Offset(scaledBounds.right, scaledBounds.center.y),
+        Offset(scaledBounds.right, scaledBounds.bottom),
+        Offset(scaledBounds.center.x, scaledBounds.bottom),
+        Offset(scaledBounds.left, scaledBounds.bottom),
+        Offset(scaledBounds.left, scaledBounds.center.y)
+    )
+    handles.forEach { handle ->
+        drawRect(
+            color = Color.White,
+            topLeft = Offset(handle.x - handleSize / 2, handle.y - handleSize / 2),
+            size = Size(handleSize, handleSize)
+        )
+        drawRect(
+            color = primaryColor,
+            topLeft = Offset(handle.x - handleSize / 2, handle.y - handleSize / 2),
+            size = Size(handleSize, handleSize),
+            style = Stroke(width = 1.5f)
+        )
+    }
+}
+
+private fun DrawScope.drawBreakpointLabel(
+    viewportWidth: Float,
+    zoom: Float,
+    panOffset: Offset,
+    canvasSize: Size
+) {
+    val x = panOffset.x + (canvasSize.width - viewportWidth * zoom) / 2
+    drawRect(
+        color = Color(0xFF424242),
+        topLeft = Offset(x, 8f),
+        size = Size(viewportWidth * zoom, 24f)
+    )
+}
+
+private fun parseBorderColor(border: String): Color {
+    val parts = border.split(" ")
+    val colorPart = parts.lastOrNull { it.startsWith("#") || it.startsWith("rgb") }
+    return colorPart?.let { parseColor(it) } ?: Color.Gray
+}
+
+private fun parseBorderWidth(border: String): Float {
+    val parts = border.split(" ")
+    val widthPart = parts.firstOrNull { it.endsWith("px") }
+    return widthPart?.let { parseSize(it) } ?: 1f
 }
 
 private fun screenToCanvas(
     screenPoint: Offset,
     zoom: Float,
     panOffset: Offset,
-    canvasSize: Size
+    canvasSize: Size,
+    viewportWidth: Float
 ): Offset {
-    val viewportWidth = 1440f
     val offsetX = panOffset.x + (canvasSize.width - viewportWidth * zoom) / 2
     val offsetY = panOffset.y + 40f
-
     return Offset(
         (screenPoint.x - offsetX) / zoom,
         (screenPoint.y - offsetY) / zoom
     )
 }
 
-private fun findElementAtPoint(elements: List<WebElement>, point: Offset): WebElement? {
+private fun findElementAtPoint(
+    elements: List<WebElement>,
+    point: Offset,
+    boundsCache: Map<String, Rect>
+): WebElement? {
     for (element in elements.reversed()) {
-        val childResult = findElementAtPoint(element.children, point)
+        val childResult = findElementAtPoint(element.children, point, boundsCache)
         if (childResult != null) return childResult
-
-        val bounds = getElementBounds(element)
-        if (bounds.contains(point)) return element
+        val bounds = boundsCache[element.id]
+        if (bounds != null && bounds.contains(point)) return element
     }
     return null
 }
 
-private fun findElementById(elements: List<WebElement>, id: String): WebElement? {
-    for (element in elements) {
-        if (element.id == id) return element
-        val childResult = findElementById(element.children, id)
-        if (childResult != null) return childResult
-    }
-    return null
-}
-
-private enum class ResizeHandle {
-    TOP_LEFT, TOP_CENTER, TOP_RIGHT,
-    MIDDLE_LEFT, MIDDLE_RIGHT,
-    BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT
-}
-
-private fun detectResizeHandle(point: Offset, bounds: Rect): ResizeHandle? {
+private fun detectResizeHandle(point: Offset, bounds: Rect): CanvasResizeHandle? {
     val handleSize = 12f
     val handles = mapOf(
-        ResizeHandle.TOP_LEFT to Offset(bounds.left, bounds.top),
-        ResizeHandle.TOP_CENTER to Offset(bounds.center.x, bounds.top),
-        ResizeHandle.TOP_RIGHT to Offset(bounds.right, bounds.top),
-        ResizeHandle.MIDDLE_RIGHT to Offset(bounds.right, bounds.center.y),
-        ResizeHandle.BOTTOM_RIGHT to Offset(bounds.right, bounds.bottom),
-        ResizeHandle.BOTTOM_CENTER to Offset(bounds.center.x, bounds.bottom),
-        ResizeHandle.BOTTOM_LEFT to Offset(bounds.left, bounds.bottom),
-        ResizeHandle.MIDDLE_LEFT to Offset(bounds.left, bounds.center.y)
+        CanvasResizeHandle.TOP_LEFT to Offset(bounds.left, bounds.top),
+        CanvasResizeHandle.TOP_CENTER to Offset(bounds.center.x, bounds.top),
+        CanvasResizeHandle.TOP_RIGHT to Offset(bounds.right, bounds.top),
+        CanvasResizeHandle.MIDDLE_RIGHT to Offset(bounds.right, bounds.center.y),
+        CanvasResizeHandle.BOTTOM_RIGHT to Offset(bounds.right, bounds.bottom),
+        CanvasResizeHandle.BOTTOM_CENTER to Offset(bounds.center.x, bounds.bottom),
+        CanvasResizeHandle.BOTTOM_LEFT to Offset(bounds.left, bounds.bottom),
+        CanvasResizeHandle.MIDDLE_LEFT to Offset(bounds.left, bounds.center.y)
     )
-
     for ((handle, handlePoint) in handles) {
         val handleBounds = Rect(
             handlePoint.x - handleSize / 2,
@@ -670,41 +606,40 @@ private fun detectResizeHandle(point: Offset, bounds: Rect): ResizeHandle? {
 
 private fun calculateResizedSize(
     bounds: Rect,
-    handle: ResizeHandle,
+    handle: CanvasResizeHandle,
     dragOffset: Offset
 ): Size {
     val minSize = 20f
-
     return when (handle) {
-        ResizeHandle.TOP_LEFT -> Size(
+        CanvasResizeHandle.TOP_LEFT -> Size(
             (bounds.width - dragOffset.x).coerceAtLeast(minSize),
             (bounds.height - dragOffset.y).coerceAtLeast(minSize)
         )
-        ResizeHandle.TOP_CENTER -> Size(
+        CanvasResizeHandle.TOP_CENTER -> Size(
             bounds.width,
             (bounds.height - dragOffset.y).coerceAtLeast(minSize)
         )
-        ResizeHandle.TOP_RIGHT -> Size(
+        CanvasResizeHandle.TOP_RIGHT -> Size(
             (bounds.width + dragOffset.x).coerceAtLeast(minSize),
             (bounds.height - dragOffset.y).coerceAtLeast(minSize)
         )
-        ResizeHandle.MIDDLE_RIGHT -> Size(
+        CanvasResizeHandle.MIDDLE_RIGHT -> Size(
             (bounds.width + dragOffset.x).coerceAtLeast(minSize),
             bounds.height
         )
-        ResizeHandle.BOTTOM_RIGHT -> Size(
+        CanvasResizeHandle.BOTTOM_RIGHT -> Size(
             (bounds.width + dragOffset.x).coerceAtLeast(minSize),
             (bounds.height + dragOffset.y).coerceAtLeast(minSize)
         )
-        ResizeHandle.BOTTOM_CENTER -> Size(
+        CanvasResizeHandle.BOTTOM_CENTER -> Size(
             bounds.width,
             (bounds.height + dragOffset.y).coerceAtLeast(minSize)
         )
-        ResizeHandle.BOTTOM_LEFT -> Size(
+        CanvasResizeHandle.BOTTOM_LEFT -> Size(
             (bounds.width - dragOffset.x).coerceAtLeast(minSize),
             (bounds.height + dragOffset.y).coerceAtLeast(minSize)
         )
-        ResizeHandle.MIDDLE_LEFT -> Size(
+        CanvasResizeHandle.MIDDLE_LEFT -> Size(
             (bounds.width - dragOffset.x).coerceAtLeast(minSize),
             bounds.height
         )
