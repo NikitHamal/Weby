@@ -343,17 +343,18 @@ class EditorViewModel(
 
     fun updateHtml(html: String) {
         _uiState.update { it.copy(generatedHtml = html) }
-        scheduleAutoSave()
     }
 
     fun updateCss(css: String) {
         _uiState.update { it.copy(generatedCss = css) }
-        scheduleAutoSave()
     }
 
     fun updateJs(js: String) {
         _uiState.update { it.copy(generatedJs = js) }
-        scheduleAutoSave()
+    }
+
+    fun syncCodeToVisual() {
+        regenerateCode()
     }
 
     fun undo() {
