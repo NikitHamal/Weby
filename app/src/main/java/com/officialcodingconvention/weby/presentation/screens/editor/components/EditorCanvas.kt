@@ -462,13 +462,13 @@ private fun DrawScope.drawSelectionOverlay(
     val handleSize = 8f
     val handles = listOf(
         Offset(scaledBounds.left, scaledBounds.top),
-        Offset(scaledBounds.centerX, scaledBounds.top),
+        Offset(scaledBounds.center.x, scaledBounds.top),
         Offset(scaledBounds.right, scaledBounds.top),
-        Offset(scaledBounds.right, scaledBounds.centerY),
+        Offset(scaledBounds.right, scaledBounds.center.y),
         Offset(scaledBounds.right, scaledBounds.bottom),
-        Offset(scaledBounds.centerX, scaledBounds.bottom),
+        Offset(scaledBounds.center.x, scaledBounds.bottom),
         Offset(scaledBounds.left, scaledBounds.bottom),
-        Offset(scaledBounds.left, scaledBounds.centerY)
+        Offset(scaledBounds.left, scaledBounds.center.y)
     )
 
     handles.forEach { handle ->
@@ -647,13 +647,13 @@ private fun detectResizeHandle(point: Offset, bounds: Rect): ResizeHandle? {
     val handleSize = 12f
     val handles = mapOf(
         ResizeHandle.TOP_LEFT to Offset(bounds.left, bounds.top),
-        ResizeHandle.TOP_CENTER to Offset(bounds.centerX, bounds.top),
+        ResizeHandle.TOP_CENTER to Offset(bounds.center.x, bounds.top),
         ResizeHandle.TOP_RIGHT to Offset(bounds.right, bounds.top),
-        ResizeHandle.MIDDLE_RIGHT to Offset(bounds.right, bounds.centerY),
+        ResizeHandle.MIDDLE_RIGHT to Offset(bounds.right, bounds.center.y),
         ResizeHandle.BOTTOM_RIGHT to Offset(bounds.right, bounds.bottom),
-        ResizeHandle.BOTTOM_CENTER to Offset(bounds.centerX, bounds.bottom),
+        ResizeHandle.BOTTOM_CENTER to Offset(bounds.center.x, bounds.bottom),
         ResizeHandle.BOTTOM_LEFT to Offset(bounds.left, bounds.bottom),
-        ResizeHandle.MIDDLE_LEFT to Offset(bounds.left, bounds.centerY)
+        ResizeHandle.MIDDLE_LEFT to Offset(bounds.left, bounds.center.y)
     )
 
     for ((handle, handlePoint) in handles) {

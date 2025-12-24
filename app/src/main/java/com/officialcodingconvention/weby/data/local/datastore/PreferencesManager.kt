@@ -38,7 +38,7 @@ class PreferencesManager(private val context: Context) {
         val EXPORT_SINGLE_FILE = booleanPreferencesKey("export_single_file")
     }
 
-    val userPreferences: Flow<UserPreferences> = context.dataStore.data
+    private val preferencesFlow: Flow<Preferences> = context.dataStore.data
         .catch { exception ->
             if (exception is IOException) {
                 emit(emptyPreferences())
@@ -46,6 +46,8 @@ class PreferencesManager(private val context: Context) {
                 throw exception
             }
         }
+
+    val userPreferences: Flow<UserPreferences> = preferencesFlow
         .map { preferences ->
             UserPreferences(
                 onboardingCompleted = preferences[PreferencesKeys.ONBOARDING_COMPLETED] ?: false,
@@ -74,6 +76,42 @@ class PreferencesManager(private val context: Context) {
                 exportSingleFile = preferences[PreferencesKeys.EXPORT_SINGLE_FILE] ?: false
             )
         }
+
+    val isDarkTheme: Flow<Boolean> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.THEME_MODE] == ThemeMode.DARK.name
+    }
+
+    val autoSaveEnabled: Flow<Boolean> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.AUTO_SAVE_ENABLED] ?: true
+    }
+
+    val autoSaveInterval: Flow<Int> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.AUTO_SAVE_INTERVAL] ?: 30
+    }
+
+    val showGrid: Flow<Boolean> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.SHOW_GRID] ?: true
+    }
+
+    val snapToGrid: Flow<Boolean> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.SNAP_TO_GRID] ?: true
+    }
+
+    val gridSize: Flow<Int> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.GRID_SIZE] ?: 8
+    }
+
+    val codeEditorFontSize: Flow<Int> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.CODE_EDITOR_FONT_SIZE] ?: 14
+    }
+
+    val showLineNumbers: Flow<Boolean> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.CODE_EDITOR_LINE_NUMBERS] ?: true
+    }
+
+    val wordWrap: Flow<Boolean> = preferencesFlow.map { preferences ->
+        preferences[PreferencesKeys.CODE_EDITOR_WORD_WRAP] ?: true
+    }
 
     suspend fun setOnboardingCompleted(completed: Boolean) {
         context.dataStore.edit { preferences ->
@@ -209,6 +247,18 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.EXPORT_SINGLE_FILE] = singleFile
         }
+    }
+
+    suspend fun setDarkTheme(isDark: Boolean) {
+        setThemeMode(if (isDark) ThemeMode.DARK else ThemeMode.LIGHT)
+    }
+
+    suspend fun setShowLineNumbers(show: Boolean) {
+        setCodeEditorLineNumbers(show)
+    }
+
+    suspend fun setWordWrap(wrap: Boolean) {
+        setCodeEditorWordWrap(wrap)
     }
 }
 

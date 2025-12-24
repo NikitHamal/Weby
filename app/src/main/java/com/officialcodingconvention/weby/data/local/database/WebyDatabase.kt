@@ -28,7 +28,7 @@ import com.officialcodingconvention.weby.data.local.database.entity.VersionSnaps
         VersionSnapshotEntity::class
     ],
     version = 1,
-    exportSchema = true
+    exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class WebyDatabase : RoomDatabase() {

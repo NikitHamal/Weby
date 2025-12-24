@@ -336,7 +336,7 @@ private fun ComponentListItem(
             }
 
             Text(
-                text = "<${component.tag}>",
+                text = "<${component.defaultTag}>",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
                 fontWeight = FontWeight.Medium
