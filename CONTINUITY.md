@@ -1,44 +1,42 @@
 # CONTINUITY.md - Weby Android App
 
 ## Goal (incl. success criteria)
-Build "Weby" - a professional, production-grade no-code web builder Android app with:
-- Material 3 Jetpack Compose UI with Poppins fonts
-- Visual drag-drop editor with performant canvas (virtualization, Canvas drawing)
-- Full code editor (HTML/CSS/JS) with syntax highlighting and large file support
-- Project management, asset library, responsive design tools
-- Clean code export (HTML/CSS/JS zip)
-- Offline-first, local storage
-- Crash handler with debug activity
-- GitHub Actions CI/CD with APK signing
-- Custom app icon with "W" + web/code elements
-- Onboarding screens
-- Package: com.officialcodingconvention.weby
+Fix build errors and simplify workflow:
+1. Fix Offset type mismatch in EditorScreen.kt and EditorViewModel.kt - DONE
+2. Fix unresolved 'tag' reference in ComponentPanel.kt - DONE (changed to defaultTag)
+3. Fix centerX/centerY references in EditorCanvas.kt - DONE (changed to center.x/center.y)
+4. Fix all unresolved references in SettingsScreen.kt - DONE (added flows and methods to PreferencesManager)
+5. Fix Room schema export warning in WebyDatabase.kt - DONE (set exportSchema = false)
+6. Simplify workflow to release-only - DONE (removed lint, test, debug jobs)
 
-Success: Fully functional, performant, production-grade app ready for release
+Success: Build should compile without errors, workflow only produces release APK
 
 ## Constraints/Assumptions
-- Kotlin + Jetpack Compose + Material 3 + Material Icons
-- Poppins font family
+- Production-grade fixes only, no TODOs
 - Max 500-1000 lines per file (modular architecture)
-- Performance-first: virtualization, efficient rendering, lazy loading
-- Offline-only, all data stored locally
-- No TODOs or placeholder code - production-ready only
-- Public keystore for open-source APK signing
+- No commits, only file changes
 
 ## Key decisions
-- Architecture: MVVM + Clean Architecture with modular packages
-- Storage: Room database + file system for assets
-- Canvas: Compose Canvas API with efficient recomposition strategies
-- Code Editor: Custom virtualized text rendering with syntax highlighting
-- Export: Zip generation with proper folder structure
+- Removed custom `Offset` data class from domain.model.EditorState and use `androidx.compose.ui.geometry.Offset` instead
+- Use `Rect.center.x` and `Rect.center.y` instead of non-existent `centerX`/`centerY` properties
+- Use `component.defaultTag` instead of `component.tag` in ComponentPanel
+- Added convenience flows to PreferencesManager: isDarkTheme, autoSaveEnabled, autoSaveInterval, showGrid, snapToGrid, gridSize, codeEditorFontSize, showLineNumbers, wordWrap
+- Added convenience methods to PreferencesManager: setDarkTheme, setShowLineNumbers, setWordWrap
+- Set `exportSchema = false` in WebyDatabase to silence Room warning
+- Simplified workflow to single `build-release` job + `release` job (removed lint, test, debug)
 
 ## State
-- Done: (none yet - starting fresh)
-- Now: Creating Android project structure from scratch
-- Next: Build core architecture, then UI screens, then editor functionality
+- Done: All fixes applied
+- Now: Complete
+- Next: N/A
 
 ## Open questions
-- (none currently)
+- (none)
 
-## Working set
-- /workspace/repo-58da8839-0f27-4654-b644-9ef8cddc06c5/
+## Working set (files changed)
+- `app/src/main/java/com/officialcodingconvention/weby/domain/model/EditorState.kt` - Replaced custom Offset with Compose Offset
+- `app/src/main/java/com/officialcodingconvention/weby/presentation/screens/editor/components/EditorCanvas.kt` - Fixed centerX/centerY to center.x/center.y
+- `app/src/main/java/com/officialcodingconvention/weby/presentation/screens/editor/components/ComponentPanel.kt` - Fixed tag to defaultTag
+- `app/src/main/java/com/officialcodingconvention/weby/data/local/database/WebyDatabase.kt` - Set exportSchema = false
+- `app/src/main/java/com/officialcodingconvention/weby/data/local/datastore/PreferencesManager.kt` - Added flows and methods
+- `.github/workflows/android.yml` - Simplified to release-only

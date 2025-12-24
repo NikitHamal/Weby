@@ -1,5 +1,7 @@
 package com.officialcodingconvention.weby.domain.model
 
+import androidx.compose.ui.geometry.Offset
+
 data class EditorState(
     val project: Project? = null,
     val currentPageId: String? = null,
@@ -35,8 +37,6 @@ enum class EditorMode {
 enum class CodeTab {
     HTML, CSS, JAVASCRIPT
 }
-
-data class Offset(val x: Float, val y: Float)
 
 data class Guide(
     val id: String,
