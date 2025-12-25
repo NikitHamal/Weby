@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,6 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import com.officialcodingconvention.weby.core.navigation.WebyNavHost
 import com.officialcodingconvention.weby.core.theme.WebyTheme
 import com.officialcodingconvention.weby.data.local.datastore.ThemeMode
+import com.officialcodingconvention.weby.data.local.datastore.UserPreferences
 
 class MainActivity : ComponentActivity() {
 
@@ -25,17 +27,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val preferences by preferencesManager.userPreferences.collectAsState(
-                initial = null
+                initial = UserPreferences()
             )
 
-            val darkTheme = when (preferences?.themeMode) {
+            val darkTheme = when (preferences.themeMode) {
                 ThemeMode.DARK -> true
                 ThemeMode.LIGHT -> false
-                else -> isSystemInDarkTheme()
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
             }
 
             WebyTheme(darkTheme = darkTheme) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     val navController = rememberNavController()
                     WebyNavHost(navController = navController)
                 }

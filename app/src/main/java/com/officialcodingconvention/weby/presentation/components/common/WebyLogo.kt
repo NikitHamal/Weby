@@ -4,7 +4,10 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
@@ -28,8 +31,10 @@ fun WebyLogo(
     secondaryColor: Color = WebySecondary,
     tertiaryColor: Color = WebyTertiary
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "logo_animation")
+
     val rotation by if (animated) {
-        rememberInfiniteTransition(label = "logo_rotation").animateFloat(
+        infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
             animationSpec = infiniteRepeatable(
@@ -38,11 +43,11 @@ fun WebyLogo(
             label = "rotation"
         )
     } else {
-        androidx.compose.runtime.remember { mutableFloatStateOf(0f) }
+        remember { mutableFloatStateOf(0f) }
     }
 
     val pulse by if (animated) {
-        rememberInfiniteTransition(label = "logo_pulse").animateFloat(
+        infiniteTransition.animateFloat(
             initialValue = 0.95f,
             targetValue = 1.05f,
             animationSpec = infiniteRepeatable(
@@ -52,7 +57,7 @@ fun WebyLogo(
             label = "pulse"
         )
     } else {
-        androidx.compose.runtime.remember { mutableFloatStateOf(1f) }
+        remember { mutableFloatStateOf(1f) }
     }
 
     Canvas(
@@ -220,5 +225,3 @@ private fun DrawScope.drawWebySymbol(
 }
 
 private val EaseInOutCubic = CubicBezierEasing(0.645f, 0.045f, 0.355f, 1f)
-
-private fun mutableFloatStateOf(value: Float) = androidx.compose.runtime.mutableFloatStateOf(value)
