@@ -1,7 +1,5 @@
 package com.officialcodingconvention.weby.presentation.screens.editor
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -13,16 +11,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.officialcodingconvention.weby.core.theme.WebyPrimary
 import com.officialcodingconvention.weby.domain.model.Breakpoint
-import com.officialcodingconvention.weby.domain.model.ComponentLibrary
 import com.officialcodingconvention.weby.domain.model.EditorMode
 import com.officialcodingconvention.weby.presentation.screens.editor.components.EditorCanvas
 import com.officialcodingconvention.weby.presentation.screens.editor.components.ComponentPanel
@@ -30,11 +24,11 @@ import com.officialcodingconvention.weby.presentation.screens.editor.components.
 import com.officialcodingconvention.weby.presentation.screens.editor.components.StylePanel
 import com.officialcodingconvention.weby.presentation.screens.editor.components.CodeEditorPanel
 
+// Simplified to 4 essential tabs
 enum class EditorTab(val icon: ImageVector, val label: String) {
-    CANVAS(Icons.Outlined.Crop169, "Canvas"),
-    COMPONENTS(Icons.Outlined.Widgets, "Components"),
+    DESIGN(Icons.Outlined.Edit, "Design"),
+    ADD(Icons.Outlined.Add, "Add"),
     LAYERS(Icons.Outlined.Layers, "Layers"),
-    STYLES(Icons.Outlined.Palette, "Styles"),
     CODE(Icons.Outlined.Code, "Code")
 }
 
@@ -48,12 +42,17 @@ fun EditorScreen(
         key = projectId
     )
 ) {
-    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
-    var selectedTab by remember { mutableStateOf(EditorTab.CANVAS) }
+    var selectedTab by remember { mutableStateOf(EditorTab.DESIGN) }
+    var showStyleSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(projectId) {
         viewModel.loadProject(projectId)
+    }
+
+    // When an element is selected in Design tab, auto-show style sheet
+    val selectedElement = uiState.currentPageElements.find {
+        it.id in uiState.editorState.selectedElementIds
     }
 
     Scaffold(
@@ -62,11 +61,11 @@ fun EditorScreen(
                 projectName = uiState.project?.name ?: "",
                 currentBreakpoint = uiState.editorState.currentBreakpoint,
                 editorMode = uiState.editorState.editorMode,
-                canUndo = uiState.editorState.history.undoStack.isNotEmpty(),
-                canRedo = uiState.editorState.history.redoStack.isNotEmpty(),
+                canUndo = uiState.canUndo,
+                canRedo = uiState.canRedo,
+                isSaving = uiState.isSaving,
                 onNavigateBack = onNavigateBack,
                 onBreakpointChange = viewModel::setBreakpoint,
-                onEditorModeChange = viewModel::setEditorMode,
                 onUndo = viewModel::undo,
                 onRedo = viewModel::redo,
                 onSave = viewModel::saveProject,
@@ -77,7 +76,9 @@ fun EditorScreen(
         bottomBar = {
             EditorBottomBar(
                 selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it }
+                onTabSelected = { selectedTab = it },
+                hasSelection = selectedElement != null,
+                onStylesClick = { showStyleSheet = true }
             )
         }
     ) { paddingValues ->
@@ -88,103 +89,123 @@ fun EditorScreen(
                 .background(MaterialTheme.colorScheme.background)
         ) {
             when {
-                uiState.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
-                uiState.error != null -> {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = uiState.error ?: "An error occurred",
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { viewModel.loadProject(projectId) }) {
-                            Text("Retry")
-                        }
-                    }
-                }
-                else -> {
-                    AnimatedContent(
-                        targetState = selectedTab,
-                        transitionSpec = {
-                            fadeIn(animationSpec = tween(150)) togetherWith
-                                fadeOut(animationSpec = tween(150))
-                        },
-                        label = "tab_content"
-                    ) { tab ->
-                        when (tab) {
-                            EditorTab.CANVAS -> {
-                                EditorCanvas(
-                                    elements = uiState.currentPageElements,
-                                    selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
-                                    breakpoint = uiState.editorState.currentBreakpoint,
-                                    zoom = uiState.editorState.zoom,
-                                    panOffset = uiState.editorState.panOffset,
-                                    showGrid = uiState.editorState.showGrid,
-                                    onElementSelected = { id -> viewModel.selectElement(id) },
-                                    onElementMoved = { id, offset -> viewModel.moveElement(id, offset) },
-                                    onElementResized = { id, size -> viewModel.resizeElement(id, size) },
-                                    onPanChanged = viewModel::setPan,
-                                    onZoomChanged = viewModel::setZoom,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.COMPONENTS -> {
-                                ComponentPanel(
-                                    onComponentSelected = { component ->
-                                        viewModel.addElementFromComponent(component)
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.LAYERS -> {
-                                LayerPanel(
-                                    elements = uiState.currentPageElements,
-                                    selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
-                                    onElementSelected = { id -> viewModel.selectElement(id) },
-                                    onElementVisibilityToggle = viewModel::toggleElementVisibility,
-                                    onElementLockToggle = viewModel::toggleElementLock,
-                                    onElementDelete = viewModel::deleteElement,
-                                    onElementDuplicate = viewModel::duplicateElement,
-                                    onMoveUp = viewModel::moveElementUp,
-                                    onMoveDown = viewModel::moveElementDown,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.STYLES -> {
-                                val selectedElement = uiState.currentPageElements.find {
-                                    it.id in uiState.editorState.selectedElementIds
-                                }
-                                StylePanel(
-                                    selectedElement = selectedElement,
-                                    onStyleChange = { styles ->
-                                        selectedElement?.let { element ->
-                                            viewModel.updateElementStyle(element.id, styles)
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            EditorTab.CODE -> {
-                                CodeEditorPanel(
-                                    htmlCode = uiState.generatedHtml,
-                                    cssCode = uiState.generatedCss,
-                                    jsCode = uiState.generatedJs,
-                                    onHtmlChange = viewModel::updateHtml,
-                                    onCssChange = viewModel::updateCss,
-                                    onJsChange = viewModel::updateJs,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-                    }
-                }
+                uiState.isLoading -> LoadingState()
+                uiState.error != null -> ErrorState(
+                    error = uiState.error!!,
+                    onRetry = { viewModel.loadProject(projectId) }
+                )
+                else -> EditorContent(
+                    selectedTab = selectedTab,
+                    uiState = uiState,
+                    viewModel = viewModel
+                )
             }
+        }
+    }
+
+    // Style bottom sheet
+    if (showStyleSheet && selectedElement != null) {
+        ModalBottomSheet(
+            onDismissRequest = { showStyleSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            StylePanel(
+                selectedElement = selectedElement,
+                onStyleChange = { styles ->
+                    viewModel.updateElementStyle(selectedElement.id, styles)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 500.dp)
+                    .padding(bottom = 32.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.LoadingState() {
+    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+}
+
+@Composable
+private fun BoxScope.ErrorState(error: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier.align(Alignment.Center),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.ErrorOutline,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.error
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = error,
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        FilledTonalButton(onClick = onRetry) {
+            Text("Retry")
+        }
+    }
+}
+
+@Composable
+private fun EditorContent(
+    selectedTab: EditorTab,
+    uiState: EditorUiState,
+    viewModel: EditorViewModel
+) {
+    when (selectedTab) {
+        EditorTab.DESIGN -> {
+            EditorCanvas(
+                elements = uiState.currentPageElements,
+                selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
+                breakpoint = uiState.editorState.currentBreakpoint,
+                zoom = uiState.editorState.zoom,
+                panOffset = uiState.editorState.panOffset,
+                showGrid = uiState.editorState.showGrid,
+                onElementSelected = viewModel::selectElement,
+                onElementMoved = viewModel::moveElement,
+                onElementResized = viewModel::resizeElement,
+                onPanChanged = viewModel::setPan,
+                onZoomChanged = viewModel::setZoom,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        EditorTab.ADD -> {
+            ComponentPanel(
+                onComponentSelected = viewModel::addElementFromComponent,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        EditorTab.LAYERS -> {
+            LayerPanel(
+                elements = uiState.currentPageElements,
+                selectedElementId = uiState.editorState.selectedElementIds.firstOrNull(),
+                onElementSelected = viewModel::selectElement,
+                onElementVisibilityToggle = viewModel::toggleElementVisibility,
+                onElementLockToggle = viewModel::toggleElementLock,
+                onElementDelete = viewModel::deleteElement,
+                onElementDuplicate = viewModel::duplicateElement,
+                onMoveUp = viewModel::moveElementUp,
+                onMoveDown = viewModel::moveElementDown,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        EditorTab.CODE -> {
+            CodeEditorPanel(
+                htmlCode = uiState.generatedHtml,
+                cssCode = uiState.generatedCss,
+                jsCode = uiState.generatedJs,
+                onHtmlChange = viewModel::updateHtml,
+                onCssChange = viewModel::updateCss,
+                onJsChange = viewModel::updateJs,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
@@ -197,9 +218,9 @@ private fun EditorTopBar(
     editorMode: EditorMode,
     canUndo: Boolean,
     canRedo: Boolean,
+    isSaving: Boolean,
     onNavigateBack: () -> Unit,
     onBreakpointChange: (Breakpoint) -> Unit,
-    onEditorModeChange: (EditorMode) -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onSave: () -> Unit,
@@ -211,12 +232,23 @@ private fun EditorTopBar(
 
     TopAppBar(
         title = {
-            Text(
-                text = projectName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = projectName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
         },
         navigationIcon = {
             IconButton(onClick = onNavigateBack) {
@@ -227,6 +259,7 @@ private fun EditorTopBar(
             }
         },
         actions = {
+            // Undo/Redo
             IconButton(onClick = onUndo, enabled = canUndo) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.Undo,
@@ -244,27 +277,18 @@ private fun EditorTopBar(
                 )
             }
 
+            // Breakpoint selector
             Box {
-                AssistChip(
-                    onClick = { showBreakpointMenu = true },
-                    label = {
-                        Text(
-                            text = currentBreakpoint.name.lowercase().replaceFirstChar { it.uppercase() },
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = when (currentBreakpoint) {
-                                Breakpoint.MOBILE -> Icons.Outlined.PhoneAndroid
-                                Breakpoint.TABLET -> Icons.Outlined.Tablet
-                                else -> Icons.Outlined.DesktopWindows
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                )
+                IconButton(onClick = { showBreakpointMenu = true }) {
+                    Icon(
+                        imageVector = when (currentBreakpoint) {
+                            Breakpoint.MOBILE -> Icons.Outlined.PhoneAndroid
+                            Breakpoint.TABLET -> Icons.Outlined.Tablet
+                            else -> Icons.Outlined.DesktopWindows
+                        },
+                        contentDescription = "Device"
+                    )
+                }
 
                 DropdownMenu(
                     expanded = showBreakpointMenu,
@@ -272,7 +296,11 @@ private fun EditorTopBar(
                 ) {
                     Breakpoint.entries.forEach { breakpoint ->
                         DropdownMenuItem(
-                            text = { Text("${breakpoint.name} (${breakpoint.width}px)") },
+                            text = {
+                                Text(
+                                    "${breakpoint.name.lowercase().replaceFirstChar { it.uppercase() }} (${breakpoint.width}px)"
+                                )
+                            },
                             onClick = {
                                 onBreakpointChange(breakpoint)
                                 showBreakpointMenu = false
@@ -301,11 +329,12 @@ private fun EditorTopBar(
                 }
             }
 
+            // More menu
             Box {
                 IconButton(onClick = { showMoreMenu = true }) {
                     Icon(
                         imageVector = Icons.Outlined.MoreVert,
-                        contentDescription = "More options"
+                        contentDescription = "More"
                     )
                 }
 
@@ -350,7 +379,9 @@ private fun EditorTopBar(
 @Composable
 private fun EditorBottomBar(
     selectedTab: EditorTab,
-    onTabSelected: (EditorTab) -> Unit
+    onTabSelected: (EditorTab) -> Unit,
+    hasSelection: Boolean,
+    onStylesClick: () -> Unit
 ) {
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -379,5 +410,33 @@ private fun EditorBottomBar(
                 )
             )
         }
+
+        // Styles button - only enabled when element is selected
+        NavigationBarItem(
+            selected = false,
+            onClick = onStylesClick,
+            enabled = hasSelection,
+            icon = {
+                Icon(
+                    imageVector = Icons.Outlined.Palette,
+                    contentDescription = "Styles",
+                    tint = if (hasSelection) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                )
+            },
+            label = {
+                Text(
+                    text = "Styles",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (hasSelection) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                )
+            },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = WebyPrimary,
+                selectedTextColor = WebyPrimary,
+                indicatorColor = WebyPrimary.copy(alpha = 0.12f)
+            )
+        )
     }
 }

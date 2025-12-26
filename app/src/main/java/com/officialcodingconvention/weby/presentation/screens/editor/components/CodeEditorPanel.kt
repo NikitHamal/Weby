@@ -4,10 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -16,15 +14,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 enum class CodeLanguage(val displayName: String, val extension: String) {
     HTML("HTML", "html"),
@@ -56,8 +54,7 @@ fun CodeEditorPanel(
             showLineNumbers = showLineNumbers,
             onLineNumbersToggle = { showLineNumbers = it },
             wrapLines = wrapLines,
-            onWrapLinesToggle = { wrapLines = it },
-            modifier = Modifier.fillMaxWidth()
+            onWrapLinesToggle = { wrapLines = it }
         )
 
         HorizontalDivider()
@@ -67,32 +64,25 @@ fun CodeEditorPanel(
                 .fillMaxSize()
                 .background(CodeEditorColors.Background)
         ) {
-            when (selectedLanguage) {
-                CodeLanguage.HTML -> CodeEditor(
-                    code = htmlCode,
-                    language = CodeLanguage.HTML,
-                    isEditable = isEditable,
-                    showLineNumbers = showLineNumbers,
-                    wrapLines = wrapLines,
-                    onCodeChange = onHtmlChange
-                )
-                CodeLanguage.CSS -> CodeEditor(
-                    code = cssCode,
-                    language = CodeLanguage.CSS,
-                    isEditable = isEditable,
-                    showLineNumbers = showLineNumbers,
-                    wrapLines = wrapLines,
-                    onCodeChange = onCssChange
-                )
-                CodeLanguage.JAVASCRIPT -> CodeEditor(
-                    code = jsCode,
-                    language = CodeLanguage.JAVASCRIPT,
-                    isEditable = isEditable,
-                    showLineNumbers = showLineNumbers,
-                    wrapLines = wrapLines,
-                    onCodeChange = onJsChange
-                )
+            val currentCode = when (selectedLanguage) {
+                CodeLanguage.HTML -> htmlCode
+                CodeLanguage.CSS -> cssCode
+                CodeLanguage.JAVASCRIPT -> jsCode
             }
+            val onCodeChange: (String) -> Unit = when (selectedLanguage) {
+                CodeLanguage.HTML -> onHtmlChange
+                CodeLanguage.CSS -> onCssChange
+                CodeLanguage.JAVASCRIPT -> onJsChange
+            }
+
+            CodeEditor(
+                code = currentCode,
+                language = selectedLanguage,
+                isEditable = isEditable,
+                showLineNumbers = showLineNumbers,
+                wrapLines = wrapLines,
+                onCodeChange = onCodeChange
+            )
         }
     }
 }
@@ -106,13 +96,9 @@ private fun CodeEditorToolbar(
     showLineNumbers: Boolean,
     onLineNumbersToggle: (Boolean) -> Unit,
     wrapLines: Boolean,
-    onWrapLinesToggle: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    onWrapLinesToggle: (Boolean) -> Unit
 ) {
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceVariant
-    ) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -186,107 +172,143 @@ private fun CodeEditor(
     wrapLines: Boolean,
     onCodeChange: (String) -> Unit
 ) {
-    val lines = remember(code) { code.split("\n") }
     val listState = rememberLazyListState()
     val horizontalScrollState = rememberScrollState()
 
+    // Split lines with memoization - only recompute when code changes
+    val lines = remember(code) {
+        if (code.isEmpty()) listOf("") else code.split("\n")
+    }
+
+    // Cache highlighted lines - compute asynchronously to avoid blocking UI
+    var highlightedLines by remember { mutableStateOf<List<AnnotatedString>>(emptyList()) }
+
+    LaunchedEffect(lines, language) {
+        highlightedLines = withContext(Dispatchers.Default) {
+            lines.map { line -> highlightLine(line, language) }
+        }
+    }
+
+    // Use plain text while highlighting is computing
+    val displayLines = if (highlightedLines.size == lines.size) {
+        highlightedLines
+    } else {
+        lines.map { AnnotatedString(it) }
+    }
+
+    if (isEditable) {
+        EditableCodeEditor(
+            code = code,
+            lineCount = lines.size,
+            showLineNumbers = showLineNumbers,
+            wrapLines = wrapLines,
+            horizontalScrollState = horizontalScrollState,
+            onCodeChange = onCodeChange
+        )
+    } else {
+        ReadOnlyCodeEditor(
+            lines = displayLines,
+            showLineNumbers = showLineNumbers,
+            wrapLines = wrapLines,
+            listState = listState,
+            horizontalScrollState = horizontalScrollState
+        )
+    }
+}
+
+@Composable
+private fun EditableCodeEditor(
+    code: String,
+    lineCount: Int,
+    showLineNumbers: Boolean,
+    wrapLines: Boolean,
+    horizontalScrollState: androidx.compose.foundation.ScrollState,
+    onCodeChange: (String) -> Unit
+) {
     var textFieldValue by remember(code) { mutableStateOf(TextFieldValue(code)) }
 
     LaunchedEffect(code) {
         if (textFieldValue.text != code) {
-            textFieldValue = TextFieldValue(code)
+            textFieldValue = textFieldValue.copy(text = code)
         }
     }
 
-    if (isEditable) {
-        BasicTextField(
-            value = textFieldValue,
-            onValueChange = {
-                textFieldValue = it
-                onCodeChange(it.text)
-            },
-            textStyle = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                color = CodeEditorColors.Text,
-                lineHeight = 20.sp
-            ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp)
-                .then(
-                    if (!wrapLines) Modifier.horizontalScroll(horizontalScrollState)
-                    else Modifier
-                ),
-            decorationBox = { innerTextField ->
-                Row {
-                    if (showLineNumbers) {
-                        LineNumbers(
-                            lineCount = textFieldValue.text.split("\n").size,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                    }
-                    innerTextField()
+    BasicTextField(
+        value = textFieldValue,
+        onValueChange = { newValue ->
+            textFieldValue = newValue
+            onCodeChange(newValue.text)
+        },
+        textStyle = codeTextStyle,
+        cursorBrush = SolidColor(Color(0xFF569CD6)),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp)
+            .then(if (!wrapLines) Modifier.horizontalScroll(horizontalScrollState) else Modifier),
+        decorationBox = { innerTextField ->
+            Row {
+                if (showLineNumbers) {
+                    VirtualizedLineNumbers(
+                        lineCount = lineCount,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
+                innerTextField()
+            }
+        }
+    )
+}
+
+@Composable
+private fun ReadOnlyCodeEditor(
+    lines: List<AnnotatedString>,
+    showLineNumbers: Boolean,
+    wrapLines: Boolean,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    horizontalScrollState: androidx.compose.foundation.ScrollState
+) {
+    Row(modifier = Modifier.fillMaxSize()) {
+        if (showLineNumbers) {
+            // Line numbers column - synced with content scroll
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .background(CodeEditorColors.LineNumberBackground)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                items(
+                    count = lines.size,
+                    key = { it }
+                ) { index ->
+                    LineNumberText(lineNumber = index + 1)
                 }
             }
-        )
-    } else {
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (showLineNumbers) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .background(CodeEditorColors.LineNumberBackground)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    itemsIndexed(lines) { index, _ ->
-                        Text(
-                            text = "${index + 1}",
-                            style = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                color = CodeEditorColors.LineNumber,
-                                lineHeight = 20.sp
-                            ),
-                            modifier = Modifier.padding(vertical = 0.dp)
-                        )
-                    }
-                }
 
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .background(CodeEditorColors.LineNumberBorder)
-                )
-            }
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(CodeEditorColors.LineNumberBorder)
+            )
+        }
 
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .then(
-                            if (!wrapLines) Modifier.horizontalScroll(horizontalScrollState)
-                            else Modifier
-                        )
-                ) {
-                    itemsIndexed(lines) { _, line ->
-                        Text(
-                            text = buildAnnotatedString {
-                                highlightCode(line, language)
-                            },
-                            style = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp
-                            ),
-                            modifier = Modifier.padding(vertical = 0.dp),
-                            softWrap = wrapLines
-                        )
-                    }
+        SelectionContainer {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .then(if (!wrapLines) Modifier.horizontalScroll(horizontalScrollState) else Modifier)
+            ) {
+                items(
+                    count = lines.size,
+                    key = { it }
+                ) { index ->
+                    Text(
+                        text = lines[index],
+                        style = codeTextStyle,
+                        softWrap = wrapLines
+                    )
                 }
             }
         }
@@ -294,102 +316,120 @@ private fun CodeEditor(
 }
 
 @Composable
-private fun LineNumbers(
+private fun VirtualizedLineNumbers(
     lineCount: Int,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    // Use LazyColumn for line numbers to virtualize large files
+    val listState = rememberLazyListState()
+
+    LazyColumn(
+        state = listState,
         modifier = modifier
             .background(CodeEditorColors.LineNumberBackground)
-            .padding(end = 8.dp)
+            .padding(end = 8.dp),
+        userScrollEnabled = false // Scroll is controlled by main content
     ) {
-        for (i in 1..lineCount) {
-            Text(
-                text = "$i",
-                style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    color = CodeEditorColors.LineNumber,
-                    lineHeight = 20.sp
-                )
-            )
+        items(
+            count = lineCount,
+            key = { it }
+        ) { index ->
+            LineNumberText(lineNumber = index + 1)
         }
     }
 }
 
-private fun AnnotatedString.Builder.highlightCode(line: String, language: CodeLanguage) {
-    when (language) {
-        CodeLanguage.HTML -> highlightHtml(line)
-        CodeLanguage.CSS -> highlightCss(line)
-        CodeLanguage.JAVASCRIPT -> highlightJavaScript(line)
+@Composable
+private fun LineNumberText(lineNumber: Int) {
+    Text(
+        text = "$lineNumber",
+        style = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp,
+            color = CodeEditorColors.LineNumber,
+            lineHeight = 20.sp
+        )
+    )
+}
+
+private val codeTextStyle = TextStyle(
+    fontFamily = FontFamily.Monospace,
+    fontSize = 13.sp,
+    color = CodeEditorColors.Text,
+    lineHeight = 20.sp
+)
+
+// Pre-compute highlighted line on background thread
+private fun highlightLine(line: String, language: CodeLanguage): AnnotatedString {
+    return buildAnnotatedString {
+        when (language) {
+            CodeLanguage.HTML -> highlightHtml(line)
+            CodeLanguage.CSS -> highlightCss(line)
+            CodeLanguage.JAVASCRIPT -> highlightJavaScript(line)
+        }
     }
 }
 
 private fun AnnotatedString.Builder.highlightHtml(line: String) {
     var i = 0
-    while (i < line.length) {
+    val len = line.length
+
+    while (i < len) {
         when {
-            line.startsWith("<!--", i) -> {
+            i + 3 < len && line[i] == '<' && line[i + 1] == '!' && line[i + 2] == '-' && line[i + 3] == '-' -> {
                 val endIndex = line.indexOf("-->", i)
-                val comment = if (endIndex >= 0) {
-                    line.substring(i, endIndex + 3)
-                } else {
-                    line.substring(i)
-                }
+                val end = if (endIndex >= 0) endIndex + 3 else len
                 withStyle(SpanStyle(color = CodeEditorColors.Comment)) {
-                    append(comment)
+                    append(line.substring(i, end))
                 }
-                i += comment.length
+                i = end
             }
             line[i] == '<' -> {
                 val tagEnd = line.indexOf('>', i)
                 if (tagEnd >= 0) {
-                    val tag = line.substring(i, tagEnd + 1)
-                    highlightHtmlTag(tag)
+                    highlightHtmlTag(line.substring(i, tagEnd + 1))
                     i = tagEnd + 1
                 } else {
-                    withStyle(SpanStyle(color = CodeEditorColors.Tag)) {
-                        append(line[i])
-                    }
+                    withStyle(SpanStyle(color = CodeEditorColors.Tag)) { append(line[i]) }
                     i++
                 }
             }
             else -> {
+                val nextTag = line.indexOf('<', i)
+                val end = if (nextTag >= 0) nextTag else len
                 withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                    append(line[i])
+                    append(line.substring(i, end))
                 }
-                i++
+                i = end
             }
         }
     }
 }
 
 private fun AnnotatedString.Builder.highlightHtmlTag(tag: String) {
-    val isClosingTag = tag.startsWith("</")
+    val isClosing = tag.startsWith("</")
     val isSelfClosing = tag.endsWith("/>")
 
     withStyle(SpanStyle(color = CodeEditorColors.Tag)) {
-        append(if (isClosingTag) "</" else "<")
+        append(if (isClosing) "</" else "<")
     }
 
-    val contentStart = if (isClosingTag) 2 else 1
-    val contentEnd = when {
-        isSelfClosing -> tag.length - 2
-        else -> tag.length - 1
-    }
+    val contentStart = if (isClosing) 2 else 1
+    val contentEnd = if (isSelfClosing) tag.length - 2 else tag.length - 1
 
     if (contentStart < contentEnd) {
         val content = tag.substring(contentStart, contentEnd)
-        val parts = content.split(Regex("\\s+"), limit = 2)
-        val tagName = parts[0]
+        val spaceIdx = content.indexOfFirst { it.isWhitespace() }
 
-        withStyle(SpanStyle(color = CodeEditorColors.TagName)) {
-            append(tagName)
-        }
-
-        if (parts.size > 1) {
-            val attrs = parts[1]
-            highlightHtmlAttributes(attrs)
+        if (spaceIdx > 0) {
+            withStyle(SpanStyle(color = CodeEditorColors.TagName)) {
+                append(content.substring(0, spaceIdx))
+            }
+            highlightHtmlAttributes(content.substring(spaceIdx))
+        } else {
+            withStyle(SpanStyle(color = CodeEditorColors.TagName)) {
+                append(content)
+            }
         }
     }
 
@@ -399,100 +439,91 @@ private fun AnnotatedString.Builder.highlightHtmlTag(tag: String) {
 }
 
 private fun AnnotatedString.Builder.highlightHtmlAttributes(attrs: String) {
-    val attrPattern = Regex("""(\w+)(?:=("[^"]*"|'[^']*'|\S+))?""")
-    var lastEnd = 0
+    var i = 0
+    val len = attrs.length
 
-    attrPattern.findAll(attrs).forEach { match ->
-        if (match.range.first > lastEnd) {
-            withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                append(attrs.substring(lastEnd, match.range.first))
+    while (i < len) {
+        when {
+            attrs[i].isWhitespace() -> {
+                append(attrs[i])
+                i++
             }
-        }
-
-        val attrName = match.groupValues[1]
-        val attrValue = match.groupValues.getOrNull(2) ?: ""
-
-        withStyle(SpanStyle(color = CodeEditorColors.Attribute)) {
-            append(attrName)
-        }
-
-        if (attrValue.isNotEmpty()) {
-            withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                append("=")
+            attrs[i].isLetter() -> {
+                val start = i
+                while (i < len && (attrs[i].isLetterOrDigit() || attrs[i] == '-')) i++
+                withStyle(SpanStyle(color = CodeEditorColors.Attribute)) {
+                    append(attrs.substring(start, i))
+                }
             }
-            withStyle(SpanStyle(color = CodeEditorColors.String)) {
-                append(attrValue)
+            attrs[i] == '=' -> {
+                append('=')
+                i++
+                // Skip whitespace
+                while (i < len && attrs[i].isWhitespace()) {
+                    append(attrs[i])
+                    i++
+                }
+                // Parse value
+                if (i < len && (attrs[i] == '"' || attrs[i] == '\'')) {
+                    val quote = attrs[i]
+                    val start = i
+                    i++
+                    while (i < len && attrs[i] != quote) i++
+                    if (i < len) i++
+                    withStyle(SpanStyle(color = CodeEditorColors.String)) {
+                        append(attrs.substring(start, i))
+                    }
+                }
             }
-        }
-
-        lastEnd = match.range.last + 1
-    }
-
-    if (lastEnd < attrs.length) {
-        withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-            append(attrs.substring(lastEnd))
+            else -> {
+                append(attrs[i])
+                i++
+            }
         }
     }
 }
 
 private fun AnnotatedString.Builder.highlightCss(line: String) {
     var i = 0
-    while (i < line.length) {
+    val len = line.length
+
+    while (i < len) {
         when {
-            line.startsWith("/*", i) -> {
-                val endIndex = line.indexOf("*/", i)
-                val comment = if (endIndex >= 0) {
-                    line.substring(i, endIndex + 2)
-                } else {
-                    line.substring(i)
-                }
+            i + 1 < len && line[i] == '/' && line[i + 1] == '*' -> {
+                val endIdx = line.indexOf("*/", i)
+                val end = if (endIdx >= 0) endIdx + 2 else len
                 withStyle(SpanStyle(color = CodeEditorColors.Comment)) {
-                    append(comment)
+                    append(line.substring(i, end))
                 }
-                i += comment.length
+                i = end
             }
             line[i] == ':' -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                    append(':')
-                }
+                withStyle(SpanStyle(color = CodeEditorColors.Text)) { append(':') }
                 i++
                 val valueStart = i
-                while (i < line.length && line[i] != ';' && line[i] != '}') {
-                    i++
-                }
+                while (i < len && line[i] != ';' && line[i] != '}') i++
                 if (i > valueStart) {
-                    val value = line.substring(valueStart, i)
-                    highlightCssValue(value)
+                    highlightCssValue(line.substring(valueStart, i))
                 }
             }
-            line[i] == '{' || line[i] == '}' || line[i] == ';' -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Punctuation)) {
-                    append(line[i])
-                }
+            line[i] in "{};," -> {
+                withStyle(SpanStyle(color = CodeEditorColors.Punctuation)) { append(line[i]) }
                 i++
             }
             line[i].isLetter() || line[i] == '-' || line[i] == '.' || line[i] == '#' || line[i] == '@' -> {
                 val start = i
-                while (i < line.length && (line[i].isLetterOrDigit() || line[i] in "-_.#@")) {
-                    i++
-                }
+                while (i < len && (line[i].isLetterOrDigit() || line[i] in "-_.#@")) i++
                 val word = line.substring(start, i)
-
                 val color = when {
                     word.startsWith("@") -> CodeEditorColors.Keyword
                     word.startsWith(".") || word.startsWith("#") -> CodeEditorColors.Selector
-                    cssProperties.contains(word) -> CodeEditorColors.Property
+                    word in cssProperties -> CodeEditorColors.Property
                     else -> CodeEditorColors.Selector
                 }
-
-                withStyle(SpanStyle(color = color)) {
-                    append(word)
-                }
+                withStyle(SpanStyle(color = color)) { append(word) }
             }
             else -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                    append(line[i])
-                }
+                withStyle(SpanStyle(color = CodeEditorColors.Text)) { append(line[i]) }
                 i++
             }
         }
@@ -501,60 +532,47 @@ private fun AnnotatedString.Builder.highlightCss(line: String) {
 
 private fun AnnotatedString.Builder.highlightCssValue(value: String) {
     var i = 0
-    while (i < value.length) {
+    val len = value.length
+
+    while (i < len) {
         when {
             value[i].isWhitespace() -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                    append(value[i])
-                }
+                append(value[i])
                 i++
             }
             value[i] == '#' -> {
-                val start = i
-                i++
-                while (i < value.length && (value[i].isLetterOrDigit())) {
-                    i++
-                }
+                val start = i++
+                while (i < len && value[i].isLetterOrDigit()) i++
                 withStyle(SpanStyle(color = CodeEditorColors.Color)) {
                     append(value.substring(start, i))
                 }
             }
             value[i].isDigit() -> {
                 val start = i
-                while (i < value.length && (value[i].isDigit() || value[i] == '.' || value[i].isLetter() || value[i] == '%')) {
-                    i++
-                }
+                while (i < len && (value[i].isDigit() || value[i] == '.' || value[i].isLetter() || value[i] == '%')) i++
                 withStyle(SpanStyle(color = CodeEditorColors.Number)) {
                     append(value.substring(start, i))
                 }
             }
             value[i] == '"' || value[i] == '\'' -> {
                 val quote = value[i]
-                val start = i
-                i++
-                while (i < value.length && value[i] != quote) {
-                    i++
-                }
-                if (i < value.length) i++
+                val start = i++
+                while (i < len && value[i] != quote) i++
+                if (i < len) i++
                 withStyle(SpanStyle(color = CodeEditorColors.String)) {
                     append(value.substring(start, i))
                 }
             }
-            else -> {
+            value[i].isLetter() -> {
                 val start = i
-                while (i < value.length && !value[i].isWhitespace() && value[i] != ',' && value[i] != '(') {
-                    i++
-                }
+                while (i < len && (value[i].isLetterOrDigit() || value[i] == '-')) i++
                 val word = value.substring(start, i)
-
-                val color = when {
-                    cssKeywords.contains(word.lowercase()) -> CodeEditorColors.Keyword
-                    else -> CodeEditorColors.Value
-                }
-
-                withStyle(SpanStyle(color = color)) {
-                    append(word)
-                }
+                val color = if (word.lowercase() in cssKeywords) CodeEditorColors.Keyword else CodeEditorColors.Value
+                withStyle(SpanStyle(color = color)) { append(word) }
+            }
+            else -> {
+                withStyle(SpanStyle(color = CodeEditorColors.Text)) { append(value[i]) }
+                i++
             }
         }
     }
@@ -562,84 +580,64 @@ private fun AnnotatedString.Builder.highlightCssValue(value: String) {
 
 private fun AnnotatedString.Builder.highlightJavaScript(line: String) {
     var i = 0
-    while (i < line.length) {
+    val len = line.length
+
+    while (i < len) {
         when {
-            line.startsWith("//", i) -> {
+            i + 1 < len && line[i] == '/' && line[i + 1] == '/' -> {
                 withStyle(SpanStyle(color = CodeEditorColors.Comment)) {
                     append(line.substring(i))
                 }
                 return
             }
-            line.startsWith("/*", i) -> {
-                val endIndex = line.indexOf("*/", i)
-                val comment = if (endIndex >= 0) {
-                    line.substring(i, endIndex + 2)
-                } else {
-                    line.substring(i)
-                }
+            i + 1 < len && line[i] == '/' && line[i + 1] == '*' -> {
+                val endIdx = line.indexOf("*/", i)
+                val end = if (endIdx >= 0) endIdx + 2 else len
                 withStyle(SpanStyle(color = CodeEditorColors.Comment)) {
-                    append(comment)
+                    append(line.substring(i, end))
                 }
-                i += comment.length
+                i = end
             }
             line[i] == '"' || line[i] == '\'' || line[i] == '`' -> {
                 val quote = line[i]
-                val start = i
-                i++
-                while (i < line.length && line[i] != quote) {
-                    if (line[i] == '\\' && i + 1 < line.length) {
-                        i += 2
-                    } else {
-                        i++
-                    }
+                val start = i++
+                while (i < len && line[i] != quote) {
+                    if (line[i] == '\\' && i + 1 < len) i += 2
+                    else i++
                 }
-                if (i < line.length) i++
+                if (i < len) i++
                 withStyle(SpanStyle(color = CodeEditorColors.String)) {
                     append(line.substring(start, i))
                 }
             }
             line[i].isDigit() -> {
                 val start = i
-                while (i < line.length && (line[i].isDigit() || line[i] == '.')) {
-                    i++
-                }
+                while (i < len && (line[i].isDigit() || line[i] == '.')) i++
                 withStyle(SpanStyle(color = CodeEditorColors.Number)) {
                     append(line.substring(start, i))
                 }
             }
             line[i].isLetter() || line[i] == '_' || line[i] == '$' -> {
                 val start = i
-                while (i < line.length && (line[i].isLetterOrDigit() || line[i] == '_' || line[i] == '$')) {
-                    i++
-                }
+                while (i < len && (line[i].isLetterOrDigit() || line[i] == '_' || line[i] == '$')) i++
                 val word = line.substring(start, i)
-
-                val color = when {
-                    jsKeywords.contains(word) -> CodeEditorColors.Keyword
-                    jsBuiltins.contains(word) -> CodeEditorColors.Builtin
+                val color = when (word) {
+                    in jsKeywords -> CodeEditorColors.Keyword
+                    in jsBuiltins -> CodeEditorColors.Builtin
                     else -> CodeEditorColors.Text
                 }
-
-                withStyle(SpanStyle(color = color)) {
-                    append(word)
-                }
+                withStyle(SpanStyle(color = color)) { append(word) }
             }
             line[i] in "{}[]();,." -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Punctuation)) {
-                    append(line[i])
-                }
+                withStyle(SpanStyle(color = CodeEditorColors.Punctuation)) { append(line[i]) }
                 i++
             }
             line[i] in "+-*/%=<>!&|^~?" -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Operator)) {
-                    append(line[i])
-                }
+                withStyle(SpanStyle(color = CodeEditorColors.Operator)) { append(line[i]) }
                 i++
             }
             else -> {
-                withStyle(SpanStyle(color = CodeEditorColors.Text)) {
-                    append(line[i])
-                }
+                withStyle(SpanStyle(color = CodeEditorColors.Text)) { append(line[i]) }
                 i++
             }
         }

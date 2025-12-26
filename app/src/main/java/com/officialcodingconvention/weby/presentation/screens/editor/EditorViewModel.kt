@@ -26,21 +26,53 @@ data class EditorUiState(
     val generatedJs: String = "",
     val error: String? = null,
     val isSaving: Boolean = false,
-    val lastSaved: Long? = null
+    val lastSaved: Long? = null,
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false
 ) {
     val currentPageElements: List<WebElement>
         get() = currentPage?.elements ?: emptyList()
 }
 
+// Lightweight snapshot for undo/redo - stores only element IDs and essential data
+private data class PageSnapshot(
+    val pageId: String,
+    val elementsJson: String,
+    val description: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 class EditorViewModel(
     private val projectRepository: ProjectRepository,
-    private val codeGenerator: CodeGenerator = CodeGenerator()
+    private val codeGenerator: CodeGenerator = CodeGenerator(),
+    private val gson: Gson = Gson()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
 
     private var autoSaveJob: Job? = null
+
+    // Memory-bounded undo/redo stacks
+    private val undoStack = ArrayDeque<PageSnapshot>(MAX_HISTORY_SIZE)
+    private val redoStack = ArrayDeque<PageSnapshot>(MAX_HISTORY_SIZE)
+
+    companion object {
+        private const val MAX_HISTORY_SIZE = 30 // Limit to prevent OOM
+
+        val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                val app = WebyApplication.getInstance()
+                val repository = ProjectRepositoryImpl(
+                    projectDao = app.database.projectDao(),
+                    fileSystemManager = app.fileSystemManager,
+                    gson = Gson()
+                )
+                return EditorViewModel(repository) as T
+            }
+        }
+    }
 
     fun loadProject(projectId: String) {
         viewModelScope.launch {
@@ -51,6 +83,10 @@ class EditorViewModel(
                     val currentPage = project.pages.find { it.isHomepage }
                         ?: project.pages.firstOrNull()
 
+                    // Clear history on project load
+                    undoStack.clear()
+                    redoStack.clear()
+
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -59,7 +95,9 @@ class EditorViewModel(
                             editorState = it.editorState.copy(
                                 project = project,
                                 currentPageId = currentPage?.id
-                            )
+                            ),
+                            canUndo = false,
+                            canRedo = false
                         )
                     }
                     regenerateCode()
@@ -74,36 +112,31 @@ class EditorViewModel(
 
     fun selectElement(elementId: String?, multiSelect: Boolean = false) {
         _uiState.update { state ->
-            val newSelection = if (elementId == null) {
-                emptySet()
-            } else if (multiSelect) {
-                if (elementId in state.editorState.selectedElementIds) {
-                    state.editorState.selectedElementIds - elementId
-                } else {
-                    state.editorState.selectedElementIds + elementId
+            val newSelection = when {
+                elementId == null -> emptySet()
+                multiSelect -> {
+                    if (elementId in state.editorState.selectedElementIds) {
+                        state.editorState.selectedElementIds - elementId
+                    } else {
+                        state.editorState.selectedElementIds + elementId
+                    }
                 }
-            } else {
-                setOf(elementId)
+                else -> setOf(elementId)
             }
             state.copy(
-                editorState = state.editorState.copy(
-                    selectedElementIds = newSelection
-                )
+                editorState = state.editorState.copy(selectedElementIds = newSelection)
             )
         }
     }
 
     fun clearSelection() {
         _uiState.update { state ->
-            state.copy(
-                editorState = state.editorState.copy(
-                    selectedElementIds = emptySet()
-                )
-            )
+            state.copy(editorState = state.editorState.copy(selectedElementIds = emptySet()))
         }
     }
 
     fun addElement(element: WebElement, parentId: String? = null, index: Int? = null) {
+        saveSnapshot("Add ${element.type.name}")
         updateCurrentPage { page ->
             val newElement = element.copy(parentId = parentId)
             val newElements = if (parentId != null) {
@@ -117,7 +150,6 @@ class EditorViewModel(
             }
             page.copy(elements = newElements)
         }
-        recordHistory("Add ${element.type.name}")
     }
 
     fun addElementAtEnd(elementType: ElementType) {
@@ -135,6 +167,7 @@ class EditorViewModel(
     }
 
     fun deleteElement(elementId: String) {
+        saveSnapshot("Delete element")
         updateCurrentPage { page ->
             page.copy(elements = removeElementById(page.elements, elementId))
         }
@@ -145,11 +178,11 @@ class EditorViewModel(
                 )
             )
         }
-        recordHistory("Delete element")
     }
 
     fun moveElement(elementId: String, offset: Offset) {
-        updateElementById(elementId) { element ->
+        // Don't save snapshot for every move - only on drag end
+        updateElementByIdSilent(elementId) { element ->
             element.copy(
                 styles = element.styles.copy(
                     position = "absolute",
@@ -160,8 +193,13 @@ class EditorViewModel(
         }
     }
 
+    fun finishMoveElement(elementId: String) {
+        saveSnapshot("Move element")
+        updateHistoryState()
+    }
+
     fun resizeElement(elementId: String, size: Size) {
-        updateElementById(elementId) { element ->
+        updateElementByIdSilent(elementId) { element ->
             element.copy(
                 styles = element.styles.copy(
                     width = "${size.width}px",
@@ -169,7 +207,11 @@ class EditorViewModel(
                 )
             )
         }
-        recordHistory("Resize element")
+    }
+
+    fun finishResizeElement(elementId: String) {
+        saveSnapshot("Resize element")
+        updateHistoryState()
     }
 
     fun addElementFromComponent(component: ComponentDefinition) {
@@ -193,9 +235,11 @@ class EditorViewModel(
         val currentPage = _uiState.value.currentPage ?: return
         val element = findElementById(currentPage.elements, elementId) ?: return
 
+        saveSnapshot("Duplicate element")
         val duplicated = duplicateElementTree(element)
-        addElement(duplicated)
-        recordHistory("Duplicate element")
+        updateCurrentPage { page ->
+            page.copy(elements = page.elements + duplicated)
+        }
     }
 
     private fun duplicateElementTree(element: WebElement): WebElement {
@@ -219,13 +263,13 @@ class EditorViewModel(
     private fun findElementById(elements: List<WebElement>, elementId: String): WebElement? {
         for (element in elements) {
             if (element.id == elementId) return element
-            val found = findElementById(element.children, elementId)
-            if (found != null) return found
+            findElementById(element.children, elementId)?.let { return it }
         }
         return null
     }
 
     fun moveElementUp(elementId: String) {
+        saveSnapshot("Move element up")
         updateCurrentPage { page ->
             val elements = page.elements.toMutableList()
             val index = elements.indexOfFirst { it.id == elementId }
@@ -235,10 +279,10 @@ class EditorViewModel(
             }
             page.copy(elements = elements)
         }
-        recordHistory("Move element up")
     }
 
     fun moveElementDown(elementId: String) {
+        saveSnapshot("Move element down")
         updateCurrentPage { page ->
             val elements = page.elements.toMutableList()
             val index = elements.indexOfFirst { it.id == elementId }
@@ -248,10 +292,10 @@ class EditorViewModel(
             }
             page.copy(elements = elements)
         }
-        recordHistory("Move element down")
     }
 
     fun updateElementStyle(elementId: String, styles: ElementStyles) {
+        saveSnapshot("Update styles")
         updateElementById(elementId) { element ->
             val currentBreakpoint = _uiState.value.editorState.currentBreakpoint
             if (currentBreakpoint == Breakpoint.DESKTOP) {
@@ -262,28 +306,22 @@ class EditorViewModel(
                 )
             }
         }
-        recordHistory("Update styles")
     }
 
     fun toggleElementVisibility(elementId: String) {
-        updateElementById(elementId) { element ->
-            element.copy(isVisible = !element.isVisible)
-        }
+        updateElementById(elementId) { it.copy(isVisible = !it.isVisible) }
     }
 
     fun toggleElementLock(elementId: String) {
-        updateElementById(elementId) { element ->
-            element.copy(isLocked = !element.isLocked)
-        }
+        updateElementById(elementId) { it.copy(isLocked = !it.isLocked) }
     }
 
     fun renameElement(elementId: String, newName: String) {
-        updateElementById(elementId) { element ->
-            element.copy(name = newName)
-        }
+        updateElementById(elementId) { it.copy(name = newName) }
     }
 
     fun reorderElement(elementId: String, newIndex: Int) {
+        saveSnapshot("Reorder elements")
         updateCurrentPage { page ->
             val elements = page.elements.toMutableList()
             val currentIndex = elements.indexOfFirst { it.id == elementId }
@@ -294,46 +332,29 @@ class EditorViewModel(
             }
             page.copy(elements = elements)
         }
-        recordHistory("Reorder elements")
     }
 
     fun setBreakpoint(breakpoint: Breakpoint) {
         _uiState.update { state ->
-            state.copy(
-                editorState = state.editorState.copy(
-                    currentBreakpoint = breakpoint
-                )
-            )
+            state.copy(editorState = state.editorState.copy(currentBreakpoint = breakpoint))
         }
     }
 
     fun setEditorMode(mode: EditorMode) {
         _uiState.update { state ->
-            state.copy(
-                editorState = state.editorState.copy(
-                    editorMode = mode
-                )
-            )
+            state.copy(editorState = state.editorState.copy(editorMode = mode))
         }
     }
 
     fun setZoom(zoom: Float) {
         _uiState.update { state ->
-            state.copy(
-                editorState = state.editorState.copy(
-                    zoom = zoom.coerceIn(0.25f, 4f)
-                )
-            )
+            state.copy(editorState = state.editorState.copy(zoom = zoom.coerceIn(0.25f, 4f)))
         }
     }
 
     fun setPan(offset: Offset) {
         _uiState.update { state ->
-            state.copy(
-                editorState = state.editorState.copy(
-                    panOffset = offset
-                )
-            )
+            state.copy(editorState = state.editorState.copy(panOffset = offset))
         }
     }
 
@@ -357,15 +378,81 @@ class EditorViewModel(
     }
 
     fun undo() {
-        val history = _uiState.value.editorState.history
-        if (history.undoStack.isEmpty()) return
-        // Implement undo logic
+        if (undoStack.isEmpty()) return
+
+        val currentPage = _uiState.value.currentPage ?: return
+        val currentSnapshot = createSnapshot("Current state")
+
+        // Push current state to redo
+        if (redoStack.size >= MAX_HISTORY_SIZE) {
+            redoStack.removeLast()
+        }
+        redoStack.addFirst(currentSnapshot)
+
+        // Pop and apply undo state
+        val snapshot = undoStack.removeFirst()
+        applySnapshot(snapshot)
+        updateHistoryState()
     }
 
     fun redo() {
-        val history = _uiState.value.editorState.history
-        if (history.redoStack.isEmpty()) return
-        // Implement redo logic
+        if (redoStack.isEmpty()) return
+
+        val currentPage = _uiState.value.currentPage ?: return
+        val currentSnapshot = createSnapshot("Current state")
+
+        // Push current state to undo
+        if (undoStack.size >= MAX_HISTORY_SIZE) {
+            undoStack.removeLast()
+        }
+        undoStack.addFirst(currentSnapshot)
+
+        // Pop and apply redo state
+        val snapshot = redoStack.removeFirst()
+        applySnapshot(snapshot)
+        updateHistoryState()
+    }
+
+    private fun saveSnapshot(description: String) {
+        val currentPage = _uiState.value.currentPage ?: return
+        val snapshot = createSnapshot(description)
+
+        // Clear redo stack on new action
+        redoStack.clear()
+
+        // Add to undo stack with size limit
+        if (undoStack.size >= MAX_HISTORY_SIZE) {
+            undoStack.removeLast()
+        }
+        undoStack.addFirst(snapshot)
+        updateHistoryState()
+    }
+
+    private fun createSnapshot(description: String): PageSnapshot {
+        val currentPage = _uiState.value.currentPage ?: return PageSnapshot("", "", description)
+        return PageSnapshot(
+            pageId = currentPage.id,
+            elementsJson = gson.toJson(currentPage.elements),
+            description = description
+        )
+    }
+
+    private fun applySnapshot(snapshot: PageSnapshot) {
+        try {
+            val elements = gson.fromJson(snapshot.elementsJson, Array<WebElement>::class.java).toList()
+            _uiState.update { state ->
+                val currentPage = state.currentPage ?: return@update state
+                if (currentPage.id != snapshot.pageId) return@update state
+                state.copy(currentPage = currentPage.copy(elements = elements))
+            }
+            regenerateCode()
+        } catch (e: Exception) {
+            // Invalid snapshot, ignore
+        }
+    }
+
+    private fun updateHistoryState() {
+        _uiState.update { it.copy(canUndo = undoStack.isNotEmpty(), canRedo = redoStack.isNotEmpty()) }
     }
 
     fun saveProject() {
@@ -414,7 +501,7 @@ class EditorViewModel(
 
     fun exportProject() {
         viewModelScope.launch {
-            // Export implementation
+            // Export implementation will be added
         }
     }
 
@@ -434,18 +521,29 @@ class EditorViewModel(
         }
     }
 
+    private fun updateElementByIdSilent(elementId: String, transform: (WebElement) -> WebElement) {
+        _uiState.update { state ->
+            val currentPage = state.currentPage ?: return@update state
+            val updatedPage = currentPage.copy(
+                elements = updateElementInList(currentPage.elements, elementId, transform)
+            )
+            state.copy(currentPage = updatedPage)
+        }
+        regenerateCode()
+    }
+
     private fun updateElementInList(
         elements: List<WebElement>,
         elementId: String,
         transform: (WebElement) -> WebElement
     ): List<WebElement> {
         return elements.map { element ->
-            if (element.id == elementId) {
-                transform(element)
-            } else if (element.children.isNotEmpty()) {
-                element.copy(children = updateElementInList(element.children, elementId, transform))
-            } else {
-                element
+            when {
+                element.id == elementId -> transform(element)
+                element.children.isNotEmpty() -> element.copy(
+                    children = updateElementInList(element.children, elementId, transform)
+                )
+                else -> element
             }
         }
     }
@@ -457,19 +555,19 @@ class EditorViewModel(
         index: Int?
     ): List<WebElement> {
         return elements.map { element ->
-            if (element.id == parentId) {
-                val newChildren = if (index != null) {
-                    element.children.toMutableList().apply { add(index, newElement) }
-                } else {
-                    element.children + newElement
+            when {
+                element.id == parentId -> {
+                    val newChildren = if (index != null) {
+                        element.children.toMutableList().apply { add(index, newElement) }
+                    } else {
+                        element.children + newElement
+                    }
+                    element.copy(children = newChildren)
                 }
-                element.copy(children = newChildren)
-            } else if (element.children.isNotEmpty()) {
-                element.copy(
+                element.children.isNotEmpty() -> element.copy(
                     children = insertElementIntoParent(element.children, newElement, parentId, index)
                 )
-            } else {
-                element
+                else -> element
             }
         }
     }
@@ -484,10 +582,6 @@ class EditorViewModel(
         }
     }
 
-    private fun recordHistory(description: String) {
-        // Record action in history for undo/redo
-    }
-
     private fun regenerateCode() {
         val currentState = _uiState.value
         val page = currentState.currentPage ?: return
@@ -499,11 +593,7 @@ class EditorViewModel(
             val js = codeGenerator.generateJs(page)
 
             _uiState.update {
-                it.copy(
-                    generatedHtml = html,
-                    generatedCss = css,
-                    generatedJs = js
-                )
+                it.copy(generatedHtml = html, generatedCss = css, generatedJs = js)
             }
         }
     }
@@ -516,18 +606,10 @@ class EditorViewModel(
         }
     }
 
-    companion object {
-        val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val app = WebyApplication.getInstance()
-                val repository = ProjectRepositoryImpl(
-                    projectDao = app.database.projectDao(),
-                    fileSystemManager = app.fileSystemManager,
-                    gson = Gson()
-                )
-                return EditorViewModel(repository) as T
-            }
-        }
+    override fun onCleared() {
+        super.onCleared()
+        autoSaveJob?.cancel()
+        undoStack.clear()
+        redoStack.clear()
     }
 }

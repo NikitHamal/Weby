@@ -2,13 +2,22 @@ package com.officialcodingconvention.weby.core.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.officialcodingconvention.weby.R
 
-val PoppinsFamily = FontFamily.SansSerif
+val PoppinsFamily = FontFamily(
+    Font(R.font.poppins_regular, FontWeight.Normal),
+    Font(R.font.poppins_medium, FontWeight.Medium),
+    Font(R.font.poppins_semibold, FontWeight.SemiBold),
+    Font(R.font.poppins_bold, FontWeight.Bold)
+)
 
-val JetBrainsMonoFamily = FontFamily.Monospace
+val JetBrainsMonoFamily = FontFamily(
+    Font(R.font.jetbrains_mono, FontWeight.Normal)
+)
 
 val WebyTypography = Typography(
     displayLarge = TextStyle(
